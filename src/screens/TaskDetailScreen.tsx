@@ -142,7 +142,7 @@ export default function TaskDetailScreen({ route }: Props) {
     const allExhausted = allRequests.length > 0 &&
       allRequests.every(r => (r.reminders_sent ?? 0) >= (r.repeat_count ?? 1))
 
-    await supabase.from('tasks').update({ status: 'open' }).eq('id', task.id)
+    await supabase.rpc('mark_task_open', { task_id: task.id })
 
     if (allExhausted && totalSent > 0) {
       // All reminders used up and still not done — apply penalties
