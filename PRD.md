@@ -61,82 +61,44 @@ Core loop: create task → pick friends + schedule → friends send reminders �
 
 ---
 
-### 🔲 Planned — Must Have
+### ✅ Implemented (continued)
 
-#### Multi-step Task Creation (replaces current single-page form)
-- [ ] **Page 1:** Title + Why (description is optional, de-emphasised)
-- [ ] **Page 2:** Difficulty (1–5)
-- [ ] **Page 3:** Pick friend(s) — can select multiple simultaneously
-- [ ] **Page 4:** Schedule — shows selected friends in large text at top, then:
-  - Pick date/time for first reminder
-  - Pick number of reminders (e.g. 1–5)
-  - Pick interval between reminders (e.g. every 5 min, 15 min, 1 hr)
-  - Pick notification type: **Standard** or **Time Sensitive** (see Notifications below)
+#### Multi-step Task Creation
+- [x] **Page 1:** Title + Why (description de-emphasised)
+- [x] **Page 2:** Difficulty (1–5)
+- [x] **Page 3:** Pick friend(s) — multiple simultaneous selection
+- [x] **Page 4:** Schedule — selected friends shown at top, date/time, repeat count (1–5), interval, notification type
 
 #### Multiple Friends Per Task
-- [ ] Send the same task reminder request to multiple friends simultaneously
-- [ ] All accepted friends can each send reminders independently
-- [ ] When task is marked done, all remaining open requests are auto-cancelled
-- [ ] Everyone receives points based on their individual performance
+- [x] Send to multiple friends simultaneously
+- [x] All accepted friends can send reminders independently
+- [x] When task marked done, all open requests auto-cancelled
+- [x] Everyone receives points based on individual performance
 
 #### Rejection Reason
-- [ ] When a friend rejects a reminder request, they can optionally write a short reason why
-- [ ] Requester sees the reason in their notification
+- [x] Friend can write optional reason when rejecting
+- [x] Requester sees reason in their notification
 
 #### Profile Screen
-- [ ] Profile icon in top-left of Dashboard header
-- [ ] Tapping navigates to a full Profile screen showing:
-  - Username
-  - Total points
-  - Option to change username
-- [ ] Username change rules:
-  - Must be unique (no duplicate usernames)
-  - Maximum 2 changes per account lifetime
-  - Show remaining changes allowed
-- [ ] Sign out button
-
-#### Points Display
-- [ ] Username + points shown on Profile screen
-- [ ] Points shown next to username on Dashboard
+- [x] Profile icon (top-left of Dashboard) → full Profile screen
+- [x] Shows username + total points
+- [x] Change username (max 2 changes, shows remaining)
+- [x] Sign out button
 
 #### Background Push Notifications
-- [ ] Supabase Edge Function triggers Expo Push API on every `notifications` table INSERT
-- [ ] Store `expo_push_token` on `users` table
-- [ ] Push token registered and saved on app launch
-- [ ] Works when app is closed or phone is locked
+- [x] Supabase Edge Function (`send-push-notification`) deployed
+- [x] Database webhook triggers Edge Function on every notification INSERT
+- [x] `expo_push_token` saved to users table on app launch
+- [x] Works when app is closed or phone is locked
 
-#### Notification Types (set by task creator on page 4)
-- [ ] **Standard:** Regular background push notification
-- [ ] **Time Sensitive:** Breaks through Focus modes, appears prominently on lock screen (iOS time-sensitive interruption level)
+#### Notification Types
+- [x] Standard and Time Sensitive options set by task creator on page 4
+- [x] Time Sensitive breaks through Focus modes on iOS
 
 #### Revised Point System
-
-**Task owner (person who needs to complete the task):**
-- Points = 1 × (reminders_left + 1) at time of completion
-  - Finished on 1st of 3 reminders → 2 left + 1 = 3 points
-  - Finished on 2nd of 3 reminders → 1 left + 1 = 2 points
-  - Finished on 3rd of 3 reminders → 0 left + 1 = 1 point
-- Penalty if not completed after all reminders sent → -1 × total reminders committed (e.g. -3 for 3 reminders)
-
-**Reminder sender (friend):**
-- 1 point per on-time reminder sent (within ±30 min of scheduled time)
-- 0 points for late or missed reminders
-- Example: A sends 2 on-time reminders → 2 points. B sends 1 on-time reminder → 1 point.
-- Senders also share the penalty if the task owner fails to complete: -1 per reminder they sent
-
-#### Database Schema Changes Required
-```sql
--- users table
-ALTER TABLE users ADD COLUMN username_changes int DEFAULT 0;
-ALTER TABLE users ADD COLUMN expo_push_token text;
-
--- reminder_requests table
-ALTER TABLE reminder_requests ADD COLUMN repeat_count int DEFAULT 1;
-ALTER TABLE reminder_requests ADD COLUMN interval_minutes int;
-ALTER TABLE reminder_requests ADD COLUMN reminders_sent int DEFAULT 0;
-ALTER TABLE reminder_requests ADD COLUMN notification_type text DEFAULT 'standard';
-ALTER TABLE reminder_requests ADD COLUMN rejection_reason text;
-```
+- [x] Owner: 1 × (reminders_left + 1) points on completion
+- [x] Friends: points = reminders_sent count
+- [x] Ordinal button text in inbox (Send 1st / 2nd / 3rd reminder)
 
 ---
 
@@ -168,4 +130,4 @@ ALTER TABLE reminder_requests ADD COLUMN rejection_reason text;
 |---------|------------|-------|
 | 1.0.0   | 2026-06-03 | First TestFlight build — core flow working |
 | 1.0.1   | 2026-06-03 | Native UI polish, Ionicons tab bar, mark-complete fix |
-| 1.0.2   | TBD        | Next release |
+| 1.0.2   | TBD        | Profile screen, multi-step wizard, multiple friends, new points, background push |
