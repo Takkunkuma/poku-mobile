@@ -79,15 +79,21 @@ export default function TaskDetailScreen({ route }: Props) {
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
 
   async function addPoints(userId: string, amount: number) {
-    const { data } = await supabase.from('users').select('points').eq('id', userId).single()
-    await supabase.from('users').update({ points: (data?.points ?? 0) + amount }).eq('id', userId)
+    await supabase.rpc('increment_points', { user_id: userId, amount })
   }
 
   async function markDone() {
     if (!task) return
     setMarking(true)
 
-    const allRequests = activeRequests.filter(r => r.status !== 'rejected')
+    // Fetch fresh from DB — component state may be stale if reminder was sent after last render
+    const { data: freshRequests } = await supabase
+      .from('reminder_requests')
+      .select('id, status, repeat_count, reminders_sent, assignee:users!reminder_requests_assignee_id_fkey(id, username)')
+      .eq('task_id', task.id)
+      .not('status', 'in', '("rejected","cancelled")')
+
+    const allRequests = (freshRequests ?? []) as unknown as ActiveRequest[]
     const totalCommitted = allRequests.reduce((sum, r) => sum + (r.repeat_count ?? 1), 0)
     const totalSent = allRequests.reduce((sum, r) => sum + (r.reminders_sent ?? 0), 0)
     const ownerPoints = Math.max(1, totalCommitted - totalSent + 1)
