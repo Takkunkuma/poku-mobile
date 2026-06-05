@@ -106,7 +106,7 @@ export default function InboxScreen() {
       .from('reminder_requests')
       .update({ reminders_sent: newCount, status: isLast ? 'sent' : 'accepted' })
       .eq('id', req.id)
-    await supabase.rpc('mark_task_reminded', { task_id: req.task_id })
+    await supabase.from('tasks').update({ status: 'reminded' }).eq('id', req.task_id)
     await supabase.from('notifications').insert({
       recipient_id: req.requester_id,
       type: 'reminder_sent',
