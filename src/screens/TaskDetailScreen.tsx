@@ -129,9 +129,50 @@ export default function TaskDetailScreen({ route }: Props) {
   async function markNotYet() {
     if (!task) return
     setNotYetLoading(true)
+
+    // Fetch fresh data to get accurate reminders_sent counts
+    const { data: freshRequests } = await supabase
+      .from('reminder_requests')
+      .select('id, status, repeat_count, reminders_sent, assignee:users!reminder_requests_assignee_id_fkey(id, username)')
+      .eq('task_id', task.id)
+      .not('status', 'in', '("rejected","cancelled")')
+
+    const allRequests = (freshRequests ?? []) as unknown as ActiveRequest[]
+    const totalSent = allRequests.reduce((sum, r) => sum + (r.reminders_sent ?? 0), 0)
+    const allExhausted = allRequests.length > 0 &&
+      allRequests.every(r => (r.reminders_sent ?? 0) >= (r.repeat_count ?? 1))
+
     await supabase.from('tasks').update({ status: 'open' }).eq('id', task.id)
+
+    if (allExhausted && totalSent > 0) {
+      // All reminders used up and still not done — apply penalties
+      await addPoints(user!.id, -totalSent)
+
+      await Promise.all(allRequests.map(async (req) => {
+        if (!req.assignee || !req.reminders_sent) return
+        await addPoints(req.assignee.id, -req.reminders_sent)
+        await supabase.from('notifications').insert({
+          recipient_id: req.assignee.id,
+          type: 'task_failed',
+          payload: {
+            task_title: task.title,
+            owner_username: username,
+            penalty: String(req.reminders_sent),
+          },
+        })
+      }))
+
+      await refreshProfile()
+      Alert.alert(
+        'Penalty applied',
+        `You used all ${totalSent} reminder${totalSent > 1 ? 's' : ''} without completing the task. -${totalSent} point${totalSent > 1 ? 's' : ''}.`
+      )
+    } else {
+      // Reminders still remaining — just reset, let them request more
+      setShowReRequest(true)
+    }
+
     setNotYetLoading(false)
-    setShowReRequest(true)
     fetchData()
   }
 

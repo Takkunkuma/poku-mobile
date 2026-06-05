@@ -22,7 +22,11 @@ const NOTIF_MESSAGES: Record<string, (payload: Record<string, string>) => { titl
   }),
   task_done: (p) => ({
     title: '🎉 Task completed!',
-    body: `@${p.owner_username} completed "${p.task_title}". You both earned +1 point!`,
+    body: `@${p.owner_username} completed "${p.task_title}". You both earned points!`,
+  }),
+  task_failed: (p) => ({
+    title: '😬 Task not completed',
+    body: `@${p.owner_username} didn't complete "${p.task_title}" after all reminders. -${p.penalty} point${p.penalty === '1' ? '' : 's'}.`,
   }),
 }
 
