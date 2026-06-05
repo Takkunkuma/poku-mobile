@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "PokU Reminder",
+    "slug": "poku-mobile",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "poku-mobile",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.takkunkuma.pokumobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.takkunkuma.pokumobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#fff7ed"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#f97316"
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "26089e7f-5e07-4c77-897c-df3cb2e6f1cb"
+      }
+    },
+    "owner": "takkunkuma"
+  }
+}
