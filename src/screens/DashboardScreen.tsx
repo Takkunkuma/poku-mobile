@@ -23,7 +23,7 @@ const statusStyle: Record<string, { bg: string; text: string; label: string }> =
 type Nav = NativeStackNavigationProp<DashboardStackParamList>
 
 export default function DashboardScreen() {
-  const { user, username, points } = useAuth()
+  const { user, username, points, refreshProfile } = useAuth()
   const navigation = useNavigation<Nav>()
   const [tasks, setTasks] = useState<Task[]>([])
   const [reminders, setReminders] = useState<Map<string, string>>(new Map())
@@ -63,7 +63,10 @@ export default function DashboardScreen() {
     setRefreshing(false)
   }
 
-  useFocusEffect(useCallback(() => { load() }, [user]))
+  useFocusEffect(useCallback(() => {
+    load()
+    refreshProfile()
+  }, [user]))
 
   useLayoutEffect(() => {
     navigation.setOptions({

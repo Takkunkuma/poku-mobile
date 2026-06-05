@@ -32,7 +32,7 @@ const INTERVALS = [
 ]
 
 export default function NewTaskScreen() {
-  const { user } = useAuth()
+  const { user, username } = useAuth()
   const navigation = useNavigation<Nav>()
 
   const [step, setStep] = useState(1)
@@ -110,7 +110,7 @@ export default function NewTaskScreen() {
             task_id: task.id,
             task_title: task.title,
             request_id: request.id,
-            from_username: user!.email,
+            from_username: username ?? user!.email,
           },
         })
       }
