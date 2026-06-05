@@ -71,6 +71,11 @@ export default function DashboardScreen() {
       title: 'My Tasks',
       headerLargeTitle: true,
       headerLargeTitleShadowVisible: false,
+      headerLeft: () => (
+        <TouchableOpacity onPress={() => navigation.navigate('Profile')} hitSlop={8}>
+          <Ionicons name="person-circle-outline" size={30} color="#9ca3af" />
+        </TouchableOpacity>
+      ),
       headerRight: () => (
         <TouchableOpacity onPress={() => navigation.navigate('NewTask')} hitSlop={8}>
           <Ionicons name="add-circle" size={28} color="#f97316" />

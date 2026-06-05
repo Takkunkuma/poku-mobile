@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications'
 import * as Device from 'expo-device'
 import Constants from 'expo-constants'
 import { Platform } from 'react-native'
+import { supabase } from '@/lib/supabase'
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -10,6 +11,7 @@ Notifications.setNotificationHandler({
     shouldSetBadge: true,
     shouldShowBanner: true,
     shouldShowList: true,
+    priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 })
 
@@ -36,6 +38,16 @@ export async function registerForPushNotifications(): Promise<string | null> {
   if (!projectId) return null
 
   const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+
+  // Save token to Supabase so the Edge Function can use it for background push
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    await supabase
+      .from('users')
+      .update({ expo_push_token: token })
+      .eq('id', user.id)
+  }
+
   return token
 }
 
