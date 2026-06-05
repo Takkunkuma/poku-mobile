@@ -32,9 +32,13 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json()
 
-    // Called by database webhook — payload is the new notification row
-    const record = body.record ?? body
-    const { recipient_id, type, payload } = record
+    // Supabase database webhook wraps the row under `record`
+    const record = body.record ?? body.new ?? body
+    const { recipient_id, type } = record
+    // payload column is jsonb — may arrive as object or JSON string
+    const payload = typeof record.payload === 'string'
+      ? JSON.parse(record.payload)
+      : (record.payload ?? {})
 
     if (!recipient_id || !type) {
       return new Response('Missing fields', { status: 400 })

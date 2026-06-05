@@ -78,6 +78,11 @@ export default function TaskDetailScreen({ route }: Props) {
 
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
 
+  async function addPoints(userId: string, amount: number) {
+    const { data } = await supabase.from('users').select('points').eq('id', userId).single()
+    await supabase.from('users').update({ points: (data?.points ?? 0) + amount }).eq('id', userId)
+  }
+
   async function markDone() {
     if (!task) return
     setMarking(true)
@@ -94,13 +99,14 @@ export default function TaskDetailScreen({ route }: Props) {
       .eq('task_id', task.id)
       .in('status', ['pending', 'accepted'])
 
-    await supabase.rpc('increment_points', { user_id: user!.id, amount: ownerPoints })
+    // Add points directly — avoids RPC version mismatch issues
+    await addPoints(user!.id, ownerPoints)
 
     await Promise.all(allRequests.map(async (req) => {
       if (!req.assignee) return
       const friendPoints = req.reminders_sent ?? 0
       if (friendPoints > 0) {
-        await supabase.rpc('increment_points', { user_id: req.assignee.id, amount: friendPoints })
+        await addPoints(req.assignee.id, friendPoints)
       }
       await supabase.from('notifications').insert({
         recipient_id: req.assignee.id,

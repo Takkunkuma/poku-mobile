@@ -33,7 +33,7 @@ export default function NotificationProvider({ children }: { children: React.Rea
     if (!user) return
 
     const channel = supabase
-      .channel('notifications-provider')
+      .channel(`notifications-${user.id}`)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'notifications',
         filter: `recipient_id=eq.${user.id}`,
