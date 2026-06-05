@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { registerForPushNotifications } from '@/lib/notifications'
 
 type AuthContextType = {
   session: Session | null
@@ -51,8 +52,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      if (session?.user) loadProfile(session.user.id)
-      else { setUsername(null); setPoints(0) }
+      if (session?.user) {
+        loadProfile(session.user.id)
+        // Register push token after auth is confirmed — avoids race condition on cold launch
+        registerForPushNotifications()
+      } else {
+        setUsername(null)
+        setPoints(0)
+      }
     })
 
     return () => subscription.unsubscribe()

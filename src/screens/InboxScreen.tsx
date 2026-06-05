@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   View, Text, SectionList, TouchableOpacity, RefreshControl,
   ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform,
@@ -61,6 +61,23 @@ export default function InboxScreen() {
   }
 
   useFocusEffect(useCallback(() => { fetchData() }, [user]))
+
+  // Realtime — new reminder requests appear instantly without re-opening inbox
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel(`inbox-${user.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'reminder_requests',
+        filter: `assignee_id=eq.${user.id}`,
+      }, () => fetchData())
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'reminder_requests',
+        filter: `assignee_id=eq.${user.id}`,
+      }, () => fetchData())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
 
   async function accept(requestId: string, requesterId: string, taskTitle: string) {
     setLoading(requestId)
