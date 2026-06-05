@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext'
 import { scheduleLocalNotification } from '@/lib/notifications'
 
 type Request = {
-  id: string; status: string; scheduled_at: string; requester_id: string
+  id: string; task_id: string; status: string; scheduled_at: string; requester_id: string
   repeat_count: number; reminders_sent: number; notification_type: string
   task: { id: string; title: string; description: string; why: string; difficulty: number }
   requester: { username: string }
@@ -42,7 +42,7 @@ export default function InboxScreen() {
     const [reqRes, notifRes] = await Promise.all([
       supabase
         .from('reminder_requests')
-        .select('id, status, scheduled_at, requester_id, repeat_count, reminders_sent, notification_type, task:tasks(id,title,description,why,difficulty), requester:users!reminder_requests_requester_id_fkey(username)')
+        .select('id, task_id, status, scheduled_at, requester_id, repeat_count, reminders_sent, notification_type, task:tasks(id,title,description,why,difficulty), requester:users!reminder_requests_requester_id_fkey(username)')
         .eq('assignee_id', user.id)
         .not('status', 'in', '("cancelled")')
         .order('created_at', { ascending: false }),
@@ -106,7 +106,7 @@ export default function InboxScreen() {
       .from('reminder_requests')
       .update({ reminders_sent: newCount, status: isLast ? 'sent' : 'accepted' })
       .eq('id', req.id)
-    await supabase.rpc('mark_task_reminded', { task_id: req.task.id })
+    await supabase.rpc('mark_task_reminded', { task_id: req.task_id })
     await supabase.from('notifications').insert({
       recipient_id: req.requester_id,
       type: 'reminder_sent',
@@ -114,7 +114,7 @@ export default function InboxScreen() {
         task_title: req.task.title,
         from_user_id: user!.id,
         from_username: username,
-        task_id: req.task.id,
+        task_id: req.task_id,
         notification_type: req.notification_type,
       },
     })
