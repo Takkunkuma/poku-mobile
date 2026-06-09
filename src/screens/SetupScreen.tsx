@@ -1,12 +1,20 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { registerForPushNotifications } from '@/lib/notifications'
 
 export default function SetupScreen() {
   const { user, refreshProfile } = useAuth()
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Request push notification permission as soon as the user lands here.
+  // This is the earliest guaranteed point where we have an authenticated user
+  // and a visible screen — iOS will show the system permission dialog here.
+  useEffect(() => {
+    registerForPushNotifications()
+  }, [])
 
   async function handleSubmit() {
     if (!username.trim() || username.length < 3) {

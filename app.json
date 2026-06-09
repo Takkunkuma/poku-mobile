@@ -2,7 +2,7 @@
   "expo": {
     "name": "PokU Reminder",
     "slug": "poku-mobile",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -11,7 +11,12 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.takkunkuma.pokumobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"],
+        "NSUserNotificationUsageDescription": "PokU sends you reminders from friends and notifies you when tasks are completed."
+      },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
       }
     },
     "android": {

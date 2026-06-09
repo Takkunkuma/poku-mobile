@@ -16,15 +16,32 @@ Notifications.setNotificationHandler({
 })
 
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (!Device.isDevice) return null
+  if (!Device.isDevice) {
+    console.log('[Push] Skipped — not a physical device')
+    return null
+  }
 
   const { status: existing } = await Notifications.getPermissionsAsync()
   let finalStatus = existing
+
   if (existing !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync()
+    const { status } = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: true,
+        allowSound: true,
+        allowCriticalAlerts: false,
+        provideAppNotificationSettings: false,
+        allowProvisional: false,
+      },
+    })
     finalStatus = status
   }
-  if (finalStatus !== 'granted') return null
+
+  if (finalStatus !== 'granted') {
+    console.log('[Push] Permission denied — status:', finalStatus)
+    return null
+  }
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
@@ -35,17 +52,34 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId
-  if (!projectId) return null
+  if (!projectId) {
+    console.log('[Push] No EAS projectId found in config')
+    return null
+  }
 
-  const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+  let token: string
+  try {
+    token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+    console.log('[Push] Token obtained:', token)
+  } catch (e) {
+    console.log('[Push] Failed to get push token:', e)
+    return null
+  }
 
   // Save token to Supabase so the Edge Function can use it for background push
   const { data: { user } } = await supabase.auth.getUser()
   if (user) {
-    await supabase
+    const { error } = await supabase
       .from('users')
       .update({ expo_push_token: token })
       .eq('id', user.id)
+    if (error) {
+      console.log('[Push] Failed to save token to Supabase:', error.message)
+    } else {
+      console.log('[Push] Token saved to Supabase for user:', user.id)
+    }
+  } else {
+    console.log('[Push] No authenticated user when saving token')
   }
 
   return token
