@@ -45,6 +45,7 @@ Deno.serve(async (req) => {
       : (record.payload ?? {})
 
     if (!recipient_id || !type) {
+      console.error('[push] Missing fields — recipient_id or type absent', JSON.stringify(record))
       return new Response('Missing fields', { status: 400 })
     }
 
@@ -56,6 +57,7 @@ Deno.serve(async (req) => {
       .single()
 
     if (error || !user?.expo_push_token) {
+      console.error(`[push] No push token for recipient ${recipient_id}`, error?.message ?? '')
       return new Response('No push token', { status: 200 })
     }
 
@@ -83,9 +85,24 @@ Deno.serve(async (req) => {
     })
 
     const result = await response.json()
+
+    // Expo returns a ticket per message — surface errors instead of swallowing them
+    const ticket = result?.data
+    if (ticket?.status === 'error') {
+      console.error(`[push] Expo rejected push to ${recipient_id}:`, JSON.stringify(ticket))
+      // Token is dead (app uninstalled / token rotated) — clear it so we stop retrying
+      if (ticket.details?.error === 'DeviceNotRegistered') {
+        await supabase.from('users').update({ expo_push_token: null }).eq('id', recipient_id)
+        console.log(`[push] Cleared dead token for ${recipient_id}`)
+      }
+    } else {
+      console.log(`[push] Sent "${type}" to ${recipient_id} — ticket: ${ticket?.id ?? 'unknown'}`)
+    }
+
     return new Response(JSON.stringify(result), { status: 200 })
 
   } catch (err) {
+    console.error('[push] Unhandled error:', String(err))
     return new Response(String(err), { status: 500 })
   }
 })
