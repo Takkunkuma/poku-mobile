@@ -80,13 +80,17 @@ Deno.serve(async (req) => {
         body: notifBody,
         sound: 'default',
         priority: 'high',
-        interruptionLevel: 'timeSensitive',
+        interruptionLevel: 'time-sensitive',
       }),
     })
 
     const result = await response.json()
 
     // Expo returns a ticket per message — surface errors instead of swallowing them
+    if (result?.errors?.length) {
+      console.error(`[push] Expo request-level error for ${recipient_id}:`, JSON.stringify(result.errors))
+      return new Response(JSON.stringify(result), { status: 200 })
+    }
     const ticket = result?.data
     if (ticket?.status === 'error') {
       console.error(`[push] Expo rejected push to ${recipient_id}:`, JSON.stringify(ticket))
