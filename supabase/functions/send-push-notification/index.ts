@@ -22,6 +22,10 @@ const NOTIF_MESSAGES: Record<string, (p: Record<string, string>) => { title: str
     title: '🔔 Reminder!',
     body: `@${p.from_username} is reminding you: "${p.task_title}"`,
   }),
+  reminder_due: (p) => ({
+    title: '⏰ Time to remind!',
+    body: `Send @${p.from_username} reminder #${p.reminder_number} for "${p.task_title}"`,
+  }),
   task_done: (p) => ({
     title: '🎉 Task completed!',
     body: `@${p.owner_username} completed "${p.task_title}". You both earned points!`,
