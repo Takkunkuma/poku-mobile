@@ -13,6 +13,7 @@ import TaskDetailScreen from '@/screens/TaskDetailScreen'
 import InboxScreen from '@/screens/InboxScreen'
 import FriendsScreen from '@/screens/FriendsScreen'
 import ProfileScreen from '@/screens/ProfileScreen'
+import ArchiveScreen from '@/screens/ArchiveScreen'
 
 // ── Param list types ────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ export type DashboardStackParamList = {
   TaskDetail: { taskId: string }
   NewTask: undefined
   Profile: undefined
+  Archive: undefined
 }
 
 type TabParamList = {
@@ -54,6 +56,7 @@ function DashboardStackNavigator() {
       <DashboardStack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task Detail' }} />
       <DashboardStack.Screen name="NewTask" component={NewTaskScreen} options={{ title: 'New Task', headerBackTitle: 'Back' }} />
       <DashboardStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+      <DashboardStack.Screen name="Archive" component={ArchiveScreen} options={{ title: 'Past Tasks' }} />
     </DashboardStack.Navigator>
   )
 }

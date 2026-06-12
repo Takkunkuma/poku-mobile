@@ -36,6 +36,7 @@ export default function DashboardScreen() {
       .from('tasks')
       .select('id, title, description, why, difficulty, status')
       .eq('owner_id', user.id)
+      .in('status', ['open', 'reminded'])
       .order('created_at', { ascending: false })
     setTasks(data ?? [])
   }
@@ -80,9 +81,14 @@ export default function DashboardScreen() {
         </TouchableOpacity>
       ),
       headerRight: () => (
-        <TouchableOpacity onPress={() => navigation.navigate('NewTask')} hitSlop={8}>
-          <Ionicons name="add-circle" size={28} color="#f97316" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <TouchableOpacity onPress={() => navigation.navigate('Archive')} hitSlop={8}>
+            <Ionicons name="archive-outline" size={26} color="#9ca3af" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('NewTask')} hitSlop={8}>
+            <Ionicons name="add-circle" size={28} color="#f97316" />
+          </TouchableOpacity>
+        </View>
       ),
     })
   }, [navigation])

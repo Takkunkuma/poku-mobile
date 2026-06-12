@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  View, Text, SectionList, TouchableOpacity, RefreshControl,
+  View, Text, FlatList, TouchableOpacity, RefreshControl,
   ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
@@ -25,6 +25,19 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
+const TABS = [
+  { key: 'requests',  label: 'Requests' },
+  { key: 'past',      label: 'Past' },
+  { key: 'completed', label: 'Completed' },
+] as const
+type TabKey = (typeof TABS)[number]['key']
+
+const EMPTY_STATES: Record<TabKey, { emoji: string; text: string }> = {
+  requests:  { emoji: '📭', text: 'No reminder requests right now.' },
+  past:      { emoji: '🕰️', text: 'No past requests yet.' },
+  completed: { emoji: '🎉', text: 'No completed tasks from friends yet.' },
+}
+
 export default function InboxScreen() {
   const { user, username } = useAuth()
   const [requests, setRequests] = useState<Request[]>([])
@@ -36,6 +49,8 @@ export default function InboxScreen() {
   // Rejection modal
   const [rejectTarget, setRejectTarget] = useState<{ id: string; requesterId: string; taskTitle: string } | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
+
+  const [tab, setTab] = useState<TabKey>('requests')
 
   async function fetchData() {
     if (!user) return
@@ -144,34 +159,55 @@ export default function InboxScreen() {
   const accepted = requests.filter(r => r.status === 'accepted')
   const past     = requests.filter(r => ['rejected', 'sent'].includes(r.status))
 
+  const tabCounts: Record<TabKey, number> = {
+    requests: pending.length + accepted.length,
+    past: past.length,
+    completed: completions.length,
+  }
+  const tabData: (Request | CompletionNotif)[] =
+    tab === 'requests' ? [...pending, ...accepted]
+    : tab === 'past' ? past
+    : completions
+
   if (fetching) {
     return <View className="flex-1 items-center justify-center"><ActivityIndicator size="large" color="#f97316" /></View>
   }
 
   return (
-    <>
-      <SectionList
-        className="flex-1 bg-gray-50"
+    <View className="flex-1 bg-gray-50">
+      {/* Segmented tab bar */}
+      <View className="flex-row mx-4 mt-3 bg-gray-200/70 rounded-xl p-1">
+        {TABS.map(t => {
+          const active = tab === t.key
+          return (
+            <TouchableOpacity
+              key={t.key}
+              onPress={() => setTab(t.key)}
+              className={`flex-1 items-center py-1.5 rounded-lg ${active ? 'bg-white shadow-sm' : ''}`}
+              activeOpacity={0.7}
+            >
+              <Text className={`text-sm font-medium ${active ? 'text-gray-900' : 'text-gray-500'}`}>
+                {t.label}{tabCounts[t.key] > 0 ? ` (${tabCounts[t.key]})` : ''}
+              </Text>
+            </TouchableOpacity>
+          )
+        })}
+      </View>
+
+      <FlatList
+        className="flex-1"
         contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData() }} tintColor="#f97316" />}
         ListEmptyComponent={
           <View className="items-center py-16">
-            <Text className="text-4xl mb-3">📭</Text>
-            <Text className="text-gray-400">No reminder requests yet.</Text>
+            <Text className="text-4xl mb-3">{EMPTY_STATES[tab].emoji}</Text>
+            <Text className="text-gray-400">{EMPTY_STATES[tab].text}</Text>
           </View>
         }
-        sections={[
-          ...(pending.length   ? [{ title: 'Pending',                   data: pending   as any[] }] : []),
-          ...(accepted.length  ? [{ title: 'Accepted — Ready to Remind', data: accepted  as any[] }] : []),
-          ...(past.length      ? [{ title: 'Past',                       data: past      as any[] }] : []),
-          ...(completions.length ? [{ title: '🎉 Completed',             data: completions as any[] }] : []),
-        ]}
+        data={tabData}
         keyExtractor={item => item.id}
-        renderSectionHeader={({ section }) => (
-          <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">{section.title}</Text>
-        )}
-        renderItem={({ item, section }) => {
-          if (section.title === '🎉 Completed') {
+        renderItem={({ item }) => {
+          if (tab === 'completed') {
             const n = item as CompletionNotif
             return (
               <View className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-2">
@@ -320,6 +356,6 @@ export default function InboxScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </>
+    </View>
   )
 }
