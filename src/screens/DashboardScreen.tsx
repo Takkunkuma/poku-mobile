@@ -23,6 +23,18 @@ type Nav = NativeStackNavigationProp<DashboardStackParamList>
 const POKE_LABEL_KEY = 'poke_label_views'
 const POKE_LABEL_THRESHOLD = 5
 
+// Each header action sits in its own white circle.
+const headerCircle = {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  backgroundColor: '#ffffff',
+  borderWidth: 0.5,
+  borderColor: '#e5e7eb',
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+}
+
 function PokePill({ count, showWord }: { count: number; showWord: boolean }) {
   if (count === 0) {
     return (
@@ -113,12 +125,22 @@ export default function DashboardScreen() {
         </TouchableOpacity>
       ),
       headerRight: () => (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          <TouchableOpacity onPress={() => navigation.navigate('Archive')} hitSlop={8}>
-            <Ionicons name="archive-outline" size={26} color="#9ca3af" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Archive')}
+            hitSlop={8}
+            style={headerCircle}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="archive-outline" size={19} color="#6b7280" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('NewTask')} hitSlop={8}>
-            <Ionicons name="add-circle" size={28} color="#f97316" />
+          <TouchableOpacity
+            onPress={() => navigation.navigate('NewTask')}
+            hitSlop={8}
+            style={headerCircle}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="add" size={22} color="#f97316" />
           </TouchableOpacity>
         </View>
       ),
