@@ -10,7 +10,7 @@ import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/dif
 
 type Request = {
   id: string; task_id: string; status: string; scheduled_at: string; requester_id: string
-  repeat_count: number; reminders_sent: number; notification_type: string
+  repeat_count: number; reminders_sent: number; notification_type: string; interval_minutes: number | null
   task: { id: string; title: string; description: string; why: string; difficulty: number }
   requester: { username: string }
 }
@@ -24,6 +24,22 @@ function ordinal(n: number): string {
   const v = n % 100
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
+
+// Countdown string that drops leading zero-units as time runs out:
+// "2d 4h 13m 50s" -> "4h 13m 50s" -> "13m 50s" -> "50s"
+function formatCountdown(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d}d ${h}h ${m}m ${sec}s`
+  if (h > 0) return `${h}h ${m}m ${sec}s`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+}
+
+const OVERDUE_GRACE_MS = 60_000
 
 const TABS = [
   { key: 'requests',  label: 'Requests' },
@@ -79,12 +95,19 @@ export default function InboxScreen() {
 
   const [tab, setTab] = useState<TabKey>('requests')
 
+  // Ticks once a second to drive the live "send reminder" countdown.
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
   async function fetchData() {
     if (!user) return
     const [reqRes, notifRes] = await Promise.all([
       supabase
         .from('reminder_requests')
-        .select('id, task_id, status, scheduled_at, requester_id, repeat_count, reminders_sent, notification_type, task:tasks(id,title,description,why,difficulty), requester:users!reminder_requests_requester_id_fkey(username)')
+        .select('id, task_id, status, scheduled_at, requester_id, repeat_count, reminders_sent, notification_type, interval_minutes, task:tasks(id,title,description,why,difficulty), requester:users!reminder_requests_requester_id_fkey(username)')
         .eq('assignee_id', user.id)
         .not('status', 'in', '("cancelled")')
         .order('created_at', { ascending: false }),
@@ -290,10 +313,19 @@ export default function InboxScreen() {
 
           const req = item as Request
           const isLoading = loading === req.id
-          const isScheduledNow = new Date(req.scheduled_at) <= new Date()
           const remindersDone = req.reminders_sent ?? 0
           const remindersLeft = (req.repeat_count ?? 1) - remindersDone
           const nextOrdinal = ordinal(remindersDone + 1)
+
+          // Next reminder is due at the scheduled time plus one interval per
+          // reminder already sent. Drives the countdown + button colour.
+          const dueAt = new Date(req.scheduled_at).getTime() + (req.interval_minutes ?? 0) * 60_000 * remindersDone
+          const remaining = dueAt - now
+          const phase = remaining > 0 ? 'waiting' : (now - dueAt) < OVERDUE_GRACE_MS ? 'due' : 'overdue'
+          const pokeBtn =
+            phase === 'due'     ? { bg: '#3b82f6', fg: '#ffffff', label: `🔔 Send ${nextOrdinal} reminder` }
+            : phase === 'overdue' ? { bg: '#f97316', fg: '#ffffff', label: `⚠️ Overdue — send ${nextOrdinal} reminder now!` }
+            : { bg: '#f3f4f6', fg: '#6b7280', label: `🕐 ${nextOrdinal} reminder in ${formatCountdown(remaining)}` }
 
           const statusColors: Record<string, { bg: string; text: string }> = {
             pending:  { bg: 'bg-yellow-100', text: 'text-yellow-700' },
@@ -360,18 +392,15 @@ export default function InboxScreen() {
                 <TouchableOpacity
                   onPress={() => sendReminder(req)}
                   disabled={isLoading}
-                  className={`w-full mt-4 rounded-2xl py-3 items-center disabled:opacity-50 ${
-                    isScheduledNow ? 'bg-blue-500' : 'bg-gray-100'
-                  }`}
+                  className="w-full mt-4 rounded-2xl py-3 items-center"
+                  style={{ backgroundColor: pokeBtn.bg, opacity: isLoading ? 0.5 : 1 }}
                   activeOpacity={0.8}
                 >
                   {isLoading ? (
-                    <ActivityIndicator color={isScheduledNow ? '#fff' : '#6b7280'} size="small" />
+                    <ActivityIndicator color={pokeBtn.fg} size="small" />
                   ) : (
-                    <Text className={`text-sm font-medium ${isScheduledNow ? 'text-white' : 'text-gray-500'}`}>
-                      {isScheduledNow
-                        ? `🔔 Send ${nextOrdinal} reminder`
-                        : `🕐 Send ${nextOrdinal} reminder (${new Date(req.scheduled_at).toLocaleString()})`}
+                    <Text className="text-sm font-medium" style={{ color: pokeBtn.fg }}>
+                      {pokeBtn.label}
                     </Text>
                   )}
                 </TouchableOpacity>
