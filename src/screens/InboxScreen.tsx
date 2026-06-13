@@ -6,6 +6,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { scheduleLocalNotification } from '@/lib/notifications'
+import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
 
 type Request = {
   id: string; task_id: string; status: string; scheduled_at: string; requester_id: string
@@ -315,7 +316,14 @@ export default function InboxScreen() {
               </View>
 
               {req.task?.why ? <Text className="text-orange-600 text-xs mb-2">💡 {req.task.why}</Text> : null}
-              <Text className="text-gray-400 text-xs mb-1">Difficulty: {'⚡'.repeat(req.task?.difficulty ?? 1)}</Text>
+              <View
+                className="self-start rounded-full px-2.5 py-0.5 mb-1.5"
+                style={{ backgroundColor: difficultyColor(req.task?.difficulty ?? 1, 0.15) }}
+              >
+                <Text className="text-xs font-medium" style={{ color: difficultyTextColor(req.task?.difficulty ?? 1) }}>
+                  {difficultyLabel(req.task?.difficulty ?? 1)}
+                </Text>
+              </View>
               <Text className="text-gray-500 text-xs">
                 First reminder: {new Date(req.scheduled_at).toLocaleString()}
               </Text>

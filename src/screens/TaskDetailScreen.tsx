@@ -7,6 +7,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
 type Props = NativeStackScreenProps<DashboardStackParamList, 'TaskDetail'>
@@ -255,7 +256,14 @@ export default function TaskDetailScreen({ route }: Props) {
             <Text className="text-orange-700 text-sm">💡 <Text className="font-bold">Why:</Text> {task.why}</Text>
           </View>
         ) : null}
-        <Text className="text-gray-400 text-xs">Difficulty: {'⚡'.repeat(task.difficulty)}</Text>
+        <View
+          className="self-start rounded-full px-3 py-1"
+          style={{ backgroundColor: difficultyColor(task.difficulty, 0.15) }}
+        >
+          <Text className="text-xs font-medium" style={{ color: difficultyTextColor(task.difficulty) }}>
+            {difficultyLabel(task.difficulty)}
+          </Text>
+        </View>
       </View>
 
       {/* Done */}

@@ -5,8 +5,10 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { Ionicons } from '@expo/vector-icons'
+import * as SecureStore from 'expo-secure-store'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { difficultyColor } from '@/lib/difficulty'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
 type Task = {
@@ -14,21 +16,52 @@ type Task = {
   why: string | null; difficulty: number; status: string
 }
 
-const statusStyle: Record<string, { bg: string; text: string; label: string }> = {
-  open:     { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'open' },
-  reminded: { bg: 'bg-blue-100',   text: 'text-blue-700',   label: 'reminded' },
-  done:     { bg: 'bg-green-100',  text: 'text-green-700',  label: 'done' },
-}
-
 type Nav = NativeStackNavigationProp<DashboardStackParamList>
 
+// Show the word "pokes" next to the count until the user has seen the dashboard
+// a few times, then collapse to just the number. Learned once, per device.
+const POKE_LABEL_KEY = 'poke_label_views'
+const POKE_LABEL_THRESHOLD = 5
+
+function PokePill({ count, showWord }: { count: number; showWord: boolean }) {
+  if (count === 0) {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 0.5, borderColor: '#d1d5db', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+        <Text style={{ fontSize: 12, color: '#9ca3af' }}>0{showWord ? ' pokes' : ''}</Text>
+      </View>
+    )
+  }
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#1f2937', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
+      <Text style={{ fontSize: 13 }}>👉</Text>
+      <Text style={{ fontSize: 14, fontWeight: '500', color: '#fff' }}>{count}</Text>
+      {showWord && <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>{count === 1 ? 'poke' : 'pokes'}</Text>}
+    </View>
+  )
+}
+
 export default function DashboardScreen() {
-  const { user, username, points, refreshProfile } = useAuth()
+  const { user, username, refreshProfile } = useAuth()
   const navigation = useNavigation<Nav>()
   const [tasks, setTasks] = useState<Task[]>([])
-  const [reminders, setReminders] = useState<Map<string, string>>(new Map())
+  const [pokes, setPokes] = useState<Map<string, number>>(new Map())
+  const [showPokeWord, setShowPokeWord] = useState(true)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+
+  // Resolve whether to show the "pokes" word, bumping the seen-counter once.
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const raw = await SecureStore.getItemAsync(POKE_LABEL_KEY)
+        const n = raw ? parseInt(raw, 10) : 0
+        if (active) setShowPokeWord(n < POKE_LABEL_THRESHOLD)
+        if (n < POKE_LABEL_THRESHOLD) await SecureStore.setItemAsync(POKE_LABEL_KEY, String(n + 1))
+      } catch { /* default to showing the word */ }
+    })()
+    return () => { active = false }
+  }, [])
 
   async function fetchTasks() {
     if (!user) return
@@ -41,25 +74,24 @@ export default function DashboardScreen() {
     setTasks(data ?? [])
   }
 
-  async function fetchUnreadReminders() {
+  // Total pokes per task = sum of reminders actually sent to me across all
+  // the friends I asked. Resets naturally when the task is completed (it leaves
+  // the active list).
+  async function fetchPokes() {
     if (!user) return
     const { data } = await supabase
-      .from('notifications')
-      .select('payload')
-      .eq('recipient_id', user.id)
-      .eq('type', 'reminder_sent')
-      .eq('read', false)
-    if (data?.length) {
-      const map = new Map<string, string>()
-      data.forEach(n => {
-        if (n.payload?.task_id) map.set(n.payload.task_id, n.payload.from_username ?? 'Your friend')
-      })
-      setReminders(map)
+      .from('reminder_requests')
+      .select('task_id, reminders_sent')
+      .eq('requester_id', user.id)
+    if (data) {
+      const m = new Map<string, number>()
+      data.forEach(r => { m.set(r.task_id, (m.get(r.task_id) ?? 0) + (r.reminders_sent ?? 0)) })
+      setPokes(m)
     }
   }
 
   async function load() {
-    await Promise.all([fetchTasks(), fetchUnreadReminders()])
+    await Promise.all([fetchTasks(), fetchPokes()])
     setLoading(false)
     setRefreshing(false)
   }
@@ -93,6 +125,7 @@ export default function DashboardScreen() {
     })
   }, [navigation])
 
+  // Realtime — a new poke bumps the count and flips the task to "reminded".
   useEffect(() => {
     if (!user) return
     const channel = supabase
@@ -103,24 +136,13 @@ export default function DashboardScreen() {
       }, (payload) => {
         const n = payload.new as { type: string; payload: Record<string, string> }
         if (n.type === 'reminder_sent' && n.payload.task_id) {
-          setReminders(prev => new Map(prev).set(n.payload.task_id, n.payload.from_username ?? 'Your friend'))
+          setPokes(prev => new Map(prev).set(n.payload.task_id, (prev.get(n.payload.task_id) ?? 0) + 1))
           setTasks(prev => prev.map(t => t.id === n.payload.task_id ? { ...t, status: 'reminded' } : t))
         }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
-
-  async function markReminderRead(taskId: string) {
-    setReminders(prev => { const m = new Map(prev); m.delete(taskId); return m })
-    await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('recipient_id', user!.id)
-      .eq('type', 'reminder_sent')
-      .eq('read', false)
-      .filter('payload->>task_id', 'eq', taskId)
-  }
 
   if (loading) {
     return <View className="flex-1 items-center justify-center"><ActivityIndicator size="large" color="#f97316" /></View>
@@ -144,54 +166,32 @@ export default function DashboardScreen() {
           </View>
         }
         renderItem={({ item: task }) => {
-          const isReminded = reminders.has(task.id)
-          const reminderFrom = reminders.get(task.id)
-          const s = statusStyle[task.status] ?? statusStyle.open
+          const isReminded = task.status === 'reminded'
+          const pokeCount = pokes.get(task.id) ?? 0
 
           return (
-            <View>
-              {isReminded && (
-                <View className="mb-1 ml-3 flex-row items-center">
-                  <View className="bg-orange-500 rounded-2xl rounded-bl-none px-4 py-2 flex-row items-center gap-2 shadow">
-                    <Text className="text-white text-sm">
-                      🔔 <Text className="font-bold">@{reminderFrom}</Text> is reminding you!
-                    </Text>
-                    <TouchableOpacity onPress={() => markReminderRead(task.id)}>
-                      <Text className="text-white opacity-70 text-xs">✕</Text>
-                    </TouchableOpacity>
-                  </View>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('TaskDetail', { taskId: task.id })}
+              className="rounded-2xl p-4 border"
+              style={{
+                backgroundColor: difficultyColor(task.difficulty, 0.15),
+                borderColor: difficultyColor(task.difficulty, 0.5),
+              }}
+              activeOpacity={0.8}
+            >
+              <View className="flex-row items-center justify-between gap-3">
+                <View className="flex-1">
+                  <Text className="font-semibold text-gray-900">{task.title}</Text>
+                  {task.why ? (
+                    <Text className="text-gray-500 text-xs mt-1" numberOfLines={1}>💡 {task.why}</Text>
+                  ) : null}
+                  {isReminded && (
+                    <Text className="text-gray-600 text-xs font-medium mt-1.5">👆 Tap to mark this done</Text>
+                  )}
                 </View>
-              )}
-              <TouchableOpacity
-                onPress={() => {
-                  if (isReminded) markReminderRead(task.id)
-                  navigation.navigate('TaskDetail', { taskId: task.id })
-                }}
-                className={`rounded-2xl p-4 shadow-sm border ${isReminded ? 'border-orange-400 bg-orange-50' : 'bg-white border-gray-100'}`}
-                activeOpacity={0.8}
-              >
-                <View className="flex-row items-start justify-between gap-2">
-                  <View className="flex-1">
-                    <Text className="font-semibold text-gray-900">{task.title}</Text>
-                    {task.description ? (
-                      <Text className="text-gray-500 text-sm mt-0.5" numberOfLines={1}>{task.description}</Text>
-                    ) : null}
-                    {task.why ? (
-                      <Text className="text-orange-500 text-xs mt-1">💡 {task.why}</Text>
-                    ) : null}
-                  </View>
-                  <View className="items-end gap-1">
-                    <View className={`rounded-full px-2 py-0.5 ${s.bg}`}>
-                      <Text className={`text-xs font-medium ${s.text}`}>{s.label}</Text>
-                    </View>
-                    <Text className="text-xs text-gray-400">{'⚡'.repeat(task.difficulty)}</Text>
-                  </View>
-                </View>
-                {isReminded && (
-                  <Text className="text-orange-600 text-xs font-medium mt-2">👆 Tap to mark this done!</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+                <PokePill count={pokeCount} showWord={showPokeWord} />
+              </View>
+            </TouchableOpacity>
           )
         }}
       />

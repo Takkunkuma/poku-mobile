@@ -9,18 +9,13 @@ import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { difficultyColor, difficultyTextColor, DIFFICULTY_LABELS } from '@/lib/difficulty'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
 type Nav = NativeStackNavigationProp<DashboardStackParamList>
 type Friend = { id: string; username: string }
 
-const DIFFICULTIES = [
-  { value: 1, desc: 'Easy' },
-  { value: 2, desc: 'Manageable' },
-  { value: 3, desc: 'Moderate' },
-  { value: 4, desc: 'Hard' },
-  { value: 5, desc: 'Very Hard' },
-]
+const DIFFICULTIES = DIFFICULTY_LABELS.map((desc, i) => ({ value: i + 1, desc }))
 
 const INTERVALS = [
   { label: '5 min', value: 5 },
@@ -210,23 +205,35 @@ export default function NewTaskScreen() {
               <Text className="text-gray-400 text-sm">Be honest — it helps your friend understand.</Text>
             </View>
             <View className="gap-3">
-              {DIFFICULTIES.map(d => (
-                <TouchableOpacity
-                  key={d.value}
-                  onPress={() => setDifficulty(d.value)}
-                  className={`flex-row items-center justify-between px-5 py-4 rounded-2xl border ${
-                    difficulty === d.value ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-200'
-                  }`}
-                  activeOpacity={0.7}
-                >
-                  <Text className={`font-semibold ${difficulty === d.value ? 'text-white' : 'text-gray-700'}`}>
-                    {d.desc}
-                  </Text>
-                  <Text className={`text-sm ${difficulty === d.value ? 'text-orange-100' : 'text-gray-400'}`}>
-                    {'⚡'.repeat(d.value)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {DIFFICULTIES.map(d => {
+                const selected = difficulty === d.value
+                return (
+                  <TouchableOpacity
+                    key={d.value}
+                    onPress={() => setDifficulty(d.value)}
+                    className="flex-row items-center justify-between px-5 py-4 rounded-2xl border"
+                    style={{
+                      backgroundColor: selected ? difficultyColor(d.value, 1) : difficultyColor(d.value, 0.12),
+                      borderColor: difficultyColor(d.value, selected ? 1 : 0.45),
+                      borderWidth: selected ? 1.5 : 1,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      className="font-semibold"
+                      style={{ color: selected ? '#ffffff' : difficultyTextColor(d.value) }}
+                    >
+                      {d.desc}
+                    </Text>
+                    <View
+                      style={{
+                        width: 14, height: 14, borderRadius: 7,
+                        backgroundColor: selected ? '#ffffff' : difficultyColor(d.value, 1),
+                      }}
+                    />
+                  </TouchableOpacity>
+                )
+              })}
             </View>
           </View>
         )}
