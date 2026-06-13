@@ -201,9 +201,11 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
     setDeleting(true)
     // No FK cascade is guaranteed, so clear the reminder requests first.
     await supabase.from('reminder_requests').delete().eq('task_id', task.id)
-    const { error } = await supabase.from('tasks').delete().eq('id', task.id)
+    // .select() so we can tell a real delete from an RLS-filtered no-op (which
+    // returns success with zero rows and no error).
+    const { data: deleted, error } = await supabase.from('tasks').delete().eq('id', task.id).select('id')
     setDeleting(false)
-    if (error) {
+    if (error || !deleted || deleted.length === 0) {
       Alert.alert('Couldn’t delete', 'Something went wrong. Please check your connection and try again.')
       return
     }
