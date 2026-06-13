@@ -38,6 +38,14 @@ const NOTIF_MESSAGES: Record<string, (p: Record<string, string>) => { title: str
     title: '😬 Task not completed',
     body: `@${p.owner_username} didn't complete "${p.task_title}" after all reminders. -${p.penalty} point${p.penalty === '1' ? '' : 's'}.`,
   }),
+  friend_request: (p) => ({
+    title: '👋 New friend request',
+    body: `@${p.from_username} wants to be friends!`,
+  }),
+  friend_accepted: (p) => ({
+    title: '🤝 Friend added',
+    body: `@${p.from_username} accepted your friend request!`,
+  }),
 }
 
 Deno.serve(async (req) => {

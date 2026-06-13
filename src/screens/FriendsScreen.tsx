@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  RefreshControl, ActivityIndicator, KeyboardAvoidingView, Platform,
+  RefreshControl, ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
@@ -14,7 +14,7 @@ type Friendship = {
 }
 
 export default function FriendsScreen() {
-  const { user } = useAuth()
+  const { user, username } = useAuth()
   const [friendships, setFriendships] = useState<Friendship[]>([])
   const [search, setSearch] = useState('')
   const [searchResult, setSearchResult] = useState<UserProfile | null | 'not_found'>(null)
@@ -53,15 +53,36 @@ export default function FriendsScreen() {
 
   async function sendRequest(addresseeId: string) {
     setAdding(true)
-    await supabase.from('friendships').insert({ requester_id: user!.id, addressee_id: addresseeId })
+    const { error } = await supabase.from('friendships').insert({ requester_id: user!.id, addressee_id: addresseeId })
+    if (error) {
+      setAdding(false)
+      Alert.alert('Couldn’t send request', 'Please check your connection and try again.')
+      return
+    }
+    // Let them know they got a friend request (in-app + push).
+    await supabase.from('notifications').insert({
+      recipient_id: addresseeId,
+      type: 'friend_request',
+      payload: { from_username: username ?? 'Someone' },
+    })
     setAdding(false)
     setSearch('')
     setSearchResult(null)
     fetchFriendships()
   }
 
-  async function acceptRequest(friendshipId: string) {
-    await supabase.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId)
+  async function acceptRequest(friendshipId: string, requesterId: string) {
+    const { error } = await supabase.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId)
+    if (error) {
+      Alert.alert('Couldn’t accept', 'Please check your connection and try again.')
+      return
+    }
+    // Tell the requester their request was accepted.
+    await supabase.from('notifications').insert({
+      recipient_id: requesterId,
+      type: 'friend_accepted',
+      payload: { from_username: username ?? 'Someone' },
+    })
     fetchFriendships()
   }
 
@@ -141,7 +162,7 @@ export default function FriendsScreen() {
                   <View key={f.id} className="bg-white rounded-2xl p-4 shadow-sm border border-orange-100 flex-row items-center justify-between mb-2">
                     <Text className="font-medium text-gray-800">@{getOther(f).username}</Text>
                     <TouchableOpacity
-                      onPress={() => acceptRequest(f.id)}
+                      onPress={() => acceptRequest(f.id, f.requester_id)}
                       className="bg-orange-500 rounded-xl px-3 py-1.5"
                       activeOpacity={0.8}
                     >

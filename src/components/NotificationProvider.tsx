@@ -36,6 +36,14 @@ const NOTIF_MESSAGES: Record<string, (payload: Record<string, string>) => { titl
     title: '😬 Task not completed',
     body: `@${p.owner_username} didn't complete "${p.task_title}" after all reminders. -${p.penalty} point${p.penalty === '1' ? '' : 's'}.`,
   }),
+  friend_request: (p) => ({
+    title: '👋 New friend request',
+    body: `@${p.from_username} wants to be friends!`,
+  }),
+  friend_accepted: (p) => ({
+    title: '🤝 Friend added',
+    body: `@${p.from_username} accepted your friend request!`,
+  }),
 }
 
 export default function NotificationProvider({ children }: { children: React.ReactNode }) {
