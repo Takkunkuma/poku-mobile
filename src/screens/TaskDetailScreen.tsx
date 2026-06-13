@@ -36,7 +36,7 @@ const statusStyle: Record<string, { bg: string; text: string }> = {
   done:     { bg: 'bg-green-100',  text: 'text-green-700'  },
 }
 
-export default function TaskDetailScreen({ route }: Props) {
+export default function TaskDetailScreen({ route, navigation }: Props) {
   const { taskId } = route.params
   const { user, username, refreshProfile } = useAuth()
 
@@ -46,6 +46,7 @@ export default function TaskDetailScreen({ route }: Props) {
   const [loading, setLoading] = useState(true)
   const [marking, setMarking] = useState(false)
   const [notYetLoading, setNotYetLoading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Re-request form state
   const [showReRequest, setShowReRequest] = useState(false)
@@ -78,6 +79,31 @@ export default function TaskDetailScreen({ route }: Props) {
   }
 
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
+
+  function confirmDelete() {
+    Alert.alert(
+      'Delete task?',
+      'This permanently removes the task and any reminder requests for it. This can’t be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: deleteTask },
+      ],
+    )
+  }
+
+  async function deleteTask() {
+    if (!task) return
+    setDeleting(true)
+    // No FK cascade is guaranteed, so clear the reminder requests first.
+    await supabase.from('reminder_requests').delete().eq('task_id', task.id)
+    const { error } = await supabase.from('tasks').delete().eq('id', task.id)
+    setDeleting(false)
+    if (error) {
+      Alert.alert('Couldn’t delete', 'Something went wrong. Please check your connection and try again.')
+      return
+    }
+    navigation.goBack()
+  }
 
   async function addPoints(userId: string, amount: number): Promise<boolean> {
     const { error } = await supabase.rpc('increment_points', { user_id: userId, amount })
@@ -397,6 +423,18 @@ export default function TaskDetailScreen({ route }: Props) {
           )}
         </TouchableOpacity>
       )}
+
+      {/* Delete task */}
+      <TouchableOpacity
+        onPress={confirmDelete}
+        disabled={deleting}
+        className="py-4 items-center mt-2 disabled:opacity-50"
+        activeOpacity={0.7}
+      >
+        {deleting ? <ActivityIndicator color="#ef4444" /> : (
+          <Text className="text-red-500 text-sm font-medium">🗑 Delete task</Text>
+        )}
+      </TouchableOpacity>
     </ScrollView>
   )
 }
