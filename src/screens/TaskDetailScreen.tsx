@@ -78,8 +78,10 @@ export default function TaskDetailScreen({ route }: Props) {
 
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
 
-  async function addPoints(userId: string, amount: number) {
-    await supabase.rpc('increment_points', { user_id: userId, amount })
+  async function addPoints(userId: string, amount: number): Promise<boolean> {
+    const { error } = await supabase.rpc('increment_points', { user_id: userId, amount })
+    if (error) console.log('[points] failed to add points', userId, amount, error.message)
+    return !error
   }
 
   async function markDone() {
@@ -98,21 +100,30 @@ export default function TaskDetailScreen({ route }: Props) {
     const totalSent = allRequests.reduce((sum, r) => sum + (r.reminders_sent ?? 0), 0)
     const ownerPoints = Math.max(1, totalCommitted - totalSent + 1)
 
-    await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
+    // Core write: mark the task done. If this fails, nothing else should run —
+    // otherwise we'd hand out points for a task that isn't actually complete.
+    const { error: doneError } = await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
+    if (doneError) {
+      setMarking(false)
+      Alert.alert('Couldn’t complete task', 'Something went wrong. Please check your connection and try again.')
+      return
+    }
+
     await supabase
       .from('reminder_requests')
       .update({ status: 'cancelled' })
       .eq('task_id', task.id)
       .in('status', ['pending', 'accepted'])
 
-    // Add points directly — avoids RPC version mismatch issues
-    await addPoints(user!.id, ownerPoints)
+    // Award points. Track any failures so we can tell the user a payout didn't land.
+    let pointsFailed = false
+    if (!(await addPoints(user!.id, ownerPoints))) pointsFailed = true
 
     await Promise.all(allRequests.map(async (req) => {
       if (!req.assignee) return
       const friendPoints = req.reminders_sent ?? 0
       if (friendPoints > 0) {
-        await addPoints(req.assignee.id, friendPoints)
+        if (!(await addPoints(req.assignee.id, friendPoints))) pointsFailed = true
       }
       await supabase.from('notifications').insert({
         recipient_id: req.assignee.id,
@@ -124,6 +135,10 @@ export default function TaskDetailScreen({ route }: Props) {
     await refreshProfile()
     setMarking(false)
     fetchData()
+
+    if (pointsFailed) {
+      Alert.alert('Task completed', 'But some points didn’t save correctly. Pull to refresh in a moment to check your total.')
+    }
   }
 
   async function markNotYet() {
@@ -142,7 +157,12 @@ export default function TaskDetailScreen({ route }: Props) {
     const allExhausted = allRequests.length > 0 &&
       allRequests.every(r => (r.reminders_sent ?? 0) >= (r.repeat_count ?? 1))
 
-    await supabase.from('tasks').update({ status: 'open' }).eq('id', task.id)
+    const { error: openError } = await supabase.from('tasks').update({ status: 'open' }).eq('id', task.id)
+    if (openError) {
+      setNotYetLoading(false)
+      Alert.alert('Something went wrong', 'Please check your connection and try again.')
+      return
+    }
 
     if (allExhausted && totalSent > 0) {
       // All reminders used up and still not done — apply penalties
@@ -179,7 +199,7 @@ export default function TaskDetailScreen({ route }: Props) {
   async function sendReRequest() {
     if (!selectedFriend || !task) return
     setSending(true)
-    const { data: request } = await supabase
+    const { data: request, error: reqError } = await supabase
       .from('reminder_requests')
       .insert({
         task_id: task.id,
@@ -193,13 +213,17 @@ export default function TaskDetailScreen({ route }: Props) {
       .select()
       .single()
 
-    if (request) {
-      await supabase.from('notifications').insert({
-        recipient_id: selectedFriend.id,
-        type: 'reminder_request',
-        payload: { task_id: task.id, task_title: task.title, request_id: request.id, from_username: username },
-      })
+    if (reqError || !request) {
+      setSending(false)
+      Alert.alert('Couldn’t send request', `We couldn’t reach @${selectedFriend.username}. Please try again.`)
+      return
     }
+
+    await supabase.from('notifications').insert({
+      recipient_id: selectedFriend.id,
+      type: 'reminder_request',
+      payload: { task_id: task.id, task_title: task.title, request_id: request.id, from_username: username },
+    })
     setSending(false)
     setShowReRequest(false)
     setSelectedFriend(null)

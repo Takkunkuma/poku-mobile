@@ -84,11 +84,14 @@ export default function NewTaskScreen() {
       .select()
       .single()
 
-    if (error || !task) { setLoading(false); Alert.alert('Error', 'Could not create task.'); return }
+    if (error || !task) { setLoading(false); Alert.alert('Error', 'Could not create task. Please try again.'); return }
 
-    // Create reminder_requests for each friend + notifications
+    // Create reminder_requests for each friend + notifications.
+    // Track which friends failed so we can surface a clear message instead of
+    // silently leaving some friends un-notified.
+    const failed: string[] = []
     await Promise.all(selectedFriends.map(async (friend) => {
-      const { data: request } = await supabase
+      const { data: request, error: reqError } = await supabase
         .from('reminder_requests')
         .insert({
           task_id: task.id,
@@ -102,21 +105,37 @@ export default function NewTaskScreen() {
         .select()
         .single()
 
-      if (request) {
-        await supabase.from('notifications').insert({
-          recipient_id: friend.id,
-          type: 'reminder_request',
-          payload: {
-            task_id: task.id,
-            task_title: task.title,
-            request_id: request.id,
-            from_username: username ?? user!.email,
-          },
-        })
+      if (reqError || !request) {
+        failed.push(friend.username)
+        return
       }
+
+      const { error: notifError } = await supabase.from('notifications').insert({
+        recipient_id: friend.id,
+        type: 'reminder_request',
+        payload: {
+          task_id: task.id,
+          task_title: task.title,
+          request_id: request.id,
+          from_username: username ?? user!.email,
+        },
+      })
+      // The request saved but the notification didn't — the friend will still
+      // see it in their Inbox (realtime), they just won't get a push. Count it
+      // as a partial failure so the user knows to follow up.
+      if (notifError) failed.push(friend.username)
     }))
 
     setLoading(false)
+
+    if (failed.length) {
+      const names = failed.map(n => `@${n}`).join(', ')
+      Alert.alert(
+        'Some friends weren’t reached',
+        `Your task was created, but we couldn’t send the request to ${names}. Open the task to try again.`,
+      )
+    }
+
     navigation.replace('TaskDetail', { taskId: task.id })
   }
 

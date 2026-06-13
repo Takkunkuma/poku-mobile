@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, RefreshControl,
-  ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform, StyleSheet,
+  ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform, StyleSheet, Alert,
 } from 'react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -131,7 +131,12 @@ export default function InboxScreen() {
 
   async function accept(requestId: string, requesterId: string, taskTitle: string) {
     setLoading(requestId)
-    await supabase.from('reminder_requests').update({ status: 'accepted' }).eq('id', requestId)
+    const { error } = await supabase.from('reminder_requests').update({ status: 'accepted' }).eq('id', requestId)
+    if (error) {
+      setLoading(null)
+      Alert.alert('Couldn’t accept', 'Something went wrong. Please try again.')
+      return
+    }
     await supabase.from('notifications').insert({
       recipient_id: requesterId,
       type: 'request_accepted',
@@ -145,10 +150,15 @@ export default function InboxScreen() {
     if (!rejectTarget) return
     const { id, requesterId, taskTitle } = rejectTarget
     setLoading(id)
-    await supabase
+    const { error } = await supabase
       .from('reminder_requests')
       .update({ status: 'rejected', rejection_reason: rejectionReason.trim() || null })
       .eq('id', id)
+    if (error) {
+      setLoading(null)
+      Alert.alert('Couldn’t reject', 'Something went wrong. Please try again.')
+      return
+    }
     await supabase.from('notifications').insert({
       recipient_id: requesterId,
       type: 'request_rejected',
@@ -169,12 +179,24 @@ export default function InboxScreen() {
     const newCount = (req.reminders_sent ?? 0) + 1
     const isLast = newCount >= (req.repeat_count ?? 1)
 
-    await supabase
+    // Core write: record that the reminder was sent. If this fails, nothing
+    // happened — bail out and tell the user instead of falsely showing "sent".
+    const { error: updateError } = await supabase
       .from('reminder_requests')
       .update({ reminders_sent: newCount, status: isLast ? 'sent' : 'accepted' })
       .eq('id', req.id)
+
+    if (updateError) {
+      setLoading(null)
+      Alert.alert('Couldn’t send reminder', 'Something went wrong. Please check your connection and try again.')
+      return
+    }
+
     await supabase.from('tasks').update({ status: 'reminded' }).eq('id', req.task_id)
-    await supabase.from('notifications').insert({
+
+    // Notification delivers the push to your friend. If it fails, the reminder
+    // still counted, but they may not get a push — let the sender know.
+    const { error: notifError } = await supabase.from('notifications').insert({
       recipient_id: req.requester_id,
       type: 'reminder_sent',
       payload: {
@@ -185,9 +207,14 @@ export default function InboxScreen() {
         notification_type: req.notification_type,
       },
     })
+
     await scheduleLocalNotification('Reminder sent!', `You reminded @${req.requester.username} about "${req.task.title}"`)
     setLoading(null)
     fetchData()
+
+    if (notifError) {
+      Alert.alert('Reminder recorded', `It counted, but @${req.requester.username} may not have gotten a push notification.`)
+    }
   }
 
   const pending  = requests.filter(r => r.status === 'pending')
