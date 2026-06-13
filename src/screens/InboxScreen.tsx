@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, RefreshControl,
-  ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform,
+  ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native'
-import { useFocusEffect } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { scheduleLocalNotification } from '@/lib/notifications'
@@ -37,6 +36,33 @@ const EMPTY_STATES: Record<TabKey, { emoji: string; text: string }> = {
   past:      { emoji: '🕰️', text: 'No past requests yet.' },
   completed: { emoji: '🎉', text: 'No completed tasks from friends yet.' },
 }
+
+const segStyles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: 'rgba(229,231,235,0.7)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  item: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  itemActive: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  label: { fontSize: 14, fontWeight: '500' },
+  labelActive: { color: '#111827' },
+  labelInactive: { color: '#6b7280' },
+})
 
 export default function InboxScreen() {
   const { user, username } = useAuth()
@@ -75,7 +101,11 @@ export default function InboxScreen() {
     setRefreshing(false)
   }
 
-  useFocusEffect(useCallback(() => { fetchData() }, [user]))
+  // Initial fetch + refetch when the signed-in user changes.
+  // Live updates are handled by the realtime subscription below, so we don't
+  // need useFocusEffect here — avoiding a navigation-context dependency that
+  // broke on tab-toggle re-renders.
+  useEffect(() => { fetchData() }, [user])
 
   // Realtime — new reminder requests appear instantly without re-opening inbox
   useEffect(() => {
@@ -89,6 +119,11 @@ export default function InboxScreen() {
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'reminder_requests',
         filter: `assignee_id=eq.${user.id}`,
+      }, () => fetchData())
+      // task_done notifications populate the Completed tab — keep it live too
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'notifications',
+        filter: `recipient_id=eq.${user.id}`,
       }, () => fetchData())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -175,18 +210,22 @@ export default function InboxScreen() {
 
   return (
     <View className="flex-1 bg-gray-50">
-      {/* Segmented tab bar */}
-      <View className="flex-row mx-4 mt-3 bg-gray-200/70 rounded-xl p-1">
+      {/* Segmented tab bar — uses inline styles for the active/inactive state.
+          NativeWind crashes if a dynamic className adds styles after the initial
+          render (it tries to "upgrade" the component and stringifies props, which
+          walks into React Navigation's throwing getKey getter). Inline styles
+          sidestep that entirely. */}
+      <View style={segStyles.bar}>
         {TABS.map(t => {
           const active = tab === t.key
           return (
             <TouchableOpacity
               key={t.key}
               onPress={() => setTab(t.key)}
-              className={`flex-1 items-center py-1.5 rounded-lg ${active ? 'bg-white shadow-sm' : ''}`}
+              style={[segStyles.item, active && segStyles.itemActive]}
               activeOpacity={0.7}
             >
-              <Text className={`text-sm font-medium ${active ? 'text-gray-900' : 'text-gray-500'}`}>
+              <Text style={[segStyles.label, active ? segStyles.labelActive : segStyles.labelInactive]}>
                 {t.label}{tabCounts[t.key] > 0 ? ` (${tabCounts[t.key]})` : ''}
               </Text>
             </TouchableOpacity>
