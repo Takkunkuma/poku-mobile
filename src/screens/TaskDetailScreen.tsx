@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native'
@@ -55,6 +55,13 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
   const [showPicker, setShowPicker] = useState(false)
   const [sending, setSending] = useState(false)
 
+  // Inline reminder editing
+  const [editMode, setEditMode] = useState(false)
+  const [editTime, setEditTime] = useState<Date | null>(null)
+  const [showEditPicker, setShowEditPicker] = useState(false)
+  const [addSelected, setAddSelected] = useState<Friend[]>([])
+  const [savingEdit, setSavingEdit] = useState(false)
+
   async function fetchData() {
     if (!user) return
     const [taskRes, requestRes, friendRes] = await Promise.all([
@@ -79,6 +86,104 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
   }
 
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
+
+  // Edit / Done toggle in the header, only while the task is still active.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () =>
+        task && task.status !== 'done' ? (
+          <TouchableOpacity onPress={() => { setEditMode(e => !e); setEditTime(null); setAddSelected([]) }} hitSlop={8}>
+            <Text style={{ color: '#f97316', fontSize: 16, fontWeight: editMode ? '600' : '400' }}>
+              {editMode ? 'Done' : 'Edit'}
+            </Text>
+          </TouchableOpacity>
+        ) : null,
+    })
+  }, [navigation, task, editMode])
+
+  // Cancel a single request you sent by mistake — notifies that person.
+  async function cancelRequest(req: ActiveRequest) {
+    if (!task || !req.assignee) return
+    setSavingEdit(true)
+    const { error } = await supabase.from('reminder_requests').update({ status: 'cancelled' }).eq('id', req.id)
+    if (error) {
+      setSavingEdit(false)
+      Alert.alert('Couldn’t cancel', 'Please check your connection and try again.')
+      return
+    }
+    await supabase.from('notifications').insert({
+      recipient_id: req.assignee.id,
+      type: 'request_cancelled',
+      payload: { task_title: task.title, from_username: username },
+    })
+    setSavingEdit(false)
+    fetchData()
+  }
+
+  // Change the reminder time for the whole task — everyone re-approves.
+  async function applyTimeChange() {
+    if (!task || !editTime) return
+    setSavingEdit(true)
+    const { error } = await supabase
+      .from('reminder_requests')
+      .update({ scheduled_at: editTime.toISOString(), status: 'pending', reminders_sent: 0, nudges_sent: 0 })
+      .eq('task_id', task.id)
+      .in('status', ['pending', 'accepted', 'sent'])
+    if (error) {
+      setSavingEdit(false)
+      Alert.alert('Couldn’t update the time', 'Please check your connection and try again.')
+      return
+    }
+    // Reminders were reset, so the task is open again until someone re-approves + reminds.
+    await supabase.from('tasks').update({ status: 'open' }).eq('id', task.id)
+    // Re-notify everyone to approve the new time.
+    const { data: reqs } = await supabase
+      .from('reminder_requests')
+      .select('id, assignee_id')
+      .eq('task_id', task.id)
+      .eq('status', 'pending')
+    await Promise.all((reqs ?? []).map(r =>
+      supabase.from('notifications').insert({
+        recipient_id: r.assignee_id,
+        type: 'reminder_request',
+        payload: { task_id: task.id, task_title: task.title, request_id: r.id, from_username: username },
+      })
+    ))
+    setEditTime(null)
+    setSavingEdit(false)
+    fetchData()
+  }
+
+  // Add more friends to remind you, matching the task's existing schedule.
+  async function addPeople() {
+    if (!task || addSelected.length === 0) return
+    setSavingEdit(true)
+    const template = activeRequests[0]
+    const sched = (editTime ?? (template ? new Date(template.scheduled_at) : new Date(Date.now() + 3600_000))).toISOString()
+    const repeat = template?.repeat_count ?? 1
+    const interval = template?.interval_minutes ?? 60
+    const failed: string[] = []
+    await Promise.all(addSelected.map(async (f) => {
+      const { data: request, error } = await supabase
+        .from('reminder_requests')
+        .insert({
+          task_id: task.id, requester_id: user!.id, assignee_id: f.id,
+          scheduled_at: sched, repeat_count: repeat, interval_minutes: interval, notification_type: 'standard',
+        })
+        .select()
+        .single()
+      if (error || !request) { failed.push(f.username); return }
+      await supabase.from('notifications').insert({
+        recipient_id: f.id,
+        type: 'reminder_request',
+        payload: { task_id: task.id, task_title: task.title, request_id: request.id, from_username: username },
+      })
+    }))
+    setAddSelected([])
+    setSavingEdit(false)
+    fetchData()
+    if (failed.length) Alert.alert('Some weren’t added', `Couldn’t reach ${failed.map(n => '@' + n).join(', ')}. Try again.`)
+  }
 
   function confirmDelete() {
     Alert.alert(
@@ -266,6 +371,10 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
   const remindedRequest = activeRequests.find(r => r.status === 'sent' && (r.reminders_sent ?? 0) > 0)
   const pendingOrAccepted = activeRequests.filter(r => ['pending', 'accepted'].includes(r.status))
 
+  const activeAssigneeIds = new Set(activeRequests.map(r => r.assignee?.id).filter(Boolean))
+  const availableToAdd = friends.filter(f => !activeAssigneeIds.has(f.id))
+  const editTimeValue = editTime ?? (activeRequests[0] ? new Date(activeRequests[0].scheduled_at) : new Date(Date.now() + 3600_000))
+
   return (
     <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
       {/* Task card */}
@@ -291,6 +400,100 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
           </Text>
         </View>
       </View>
+
+      {/* Inline reminder editing (toggled via the header Edit button) */}
+      {editMode && task.status !== 'done' && (
+        <View className="bg-white rounded-2xl shadow-sm border border-orange-200 p-5 gap-4">
+          <Text className="font-bold text-gray-900">Edit reminders</Text>
+
+          {/* Change time for everyone */}
+          <View className="gap-2">
+            <Text className="text-sm font-semibold text-gray-700">Reminder time</Text>
+            <TouchableOpacity
+              onPress={() => setShowEditPicker(true)}
+              className="border border-gray-200 rounded-2xl px-4 py-3"
+              activeOpacity={0.7}
+            >
+              <Text className="text-gray-700 text-sm">{editTimeValue.toLocaleString()}</Text>
+            </TouchableOpacity>
+            {showEditPicker && (
+              <DateTimePicker
+                value={editTimeValue}
+                mode="datetime"
+                minimumDate={new Date()}
+                onChange={(_, date) => { setShowEditPicker(false); if (date) setEditTime(date) }}
+              />
+            )}
+            {editTime && (
+              <>
+                <Text className="text-orange-600 text-xs">Changing the time asks everyone to approve again.</Text>
+                <TouchableOpacity
+                  onPress={applyTimeChange}
+                  disabled={savingEdit}
+                  className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
+                  activeOpacity={0.8}
+                >
+                  {savingEdit ? <ActivityIndicator color="#fff" /> : (
+                    <Text className="text-white font-semibold text-sm">Apply new time</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
+          {/* Cancel existing requests */}
+          {activeRequests.length > 0 && (
+            <View className="gap-2 border-t border-gray-100 pt-3">
+              <Text className="text-sm font-semibold text-gray-700">People reminding you</Text>
+              {activeRequests.map(req => (
+                <View key={req.id} className="flex-row items-center justify-between">
+                  <Text className="text-gray-800">@{req.assignee?.username ?? '...'}</Text>
+                  <TouchableOpacity onPress={() => cancelRequest(req)} disabled={savingEdit} className="px-3 py-1.5">
+                    <Text className="text-red-500 text-sm font-medium">Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Add more people */}
+          {availableToAdd.length > 0 && (
+            <View className="gap-2 border-t border-gray-100 pt-3">
+              <Text className="text-sm font-semibold text-gray-700">Add more people</Text>
+              <View className="flex-row flex-wrap gap-2">
+                {availableToAdd.map(f => {
+                  const sel = addSelected.some(x => x.id === f.id)
+                  return (
+                    <TouchableOpacity
+                      key={f.id}
+                      onPress={() => setAddSelected(prev => sel ? prev.filter(x => x.id !== f.id) : [...prev, f])}
+                      className="rounded-full px-3 py-1.5 border"
+                      style={{ backgroundColor: sel ? '#f97316' : '#ffffff', borderColor: sel ? '#f97316' : '#e5e7eb' }}
+                      activeOpacity={0.7}
+                    >
+                      <Text className="text-sm font-medium" style={{ color: sel ? '#ffffff' : '#374151' }}>@{f.username}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+              {addSelected.length > 0 && (
+                <TouchableOpacity
+                  onPress={addPeople}
+                  disabled={savingEdit}
+                  className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
+                  activeOpacity={0.8}
+                >
+                  {savingEdit ? <ActivityIndicator color="#fff" /> : (
+                    <Text className="text-white font-semibold text-sm">
+                      Add {addSelected.length} {addSelected.length === 1 ? 'person' : 'people'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Done */}
       {task.status === 'done' && (

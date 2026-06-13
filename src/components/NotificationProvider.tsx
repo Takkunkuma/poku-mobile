@@ -16,6 +16,10 @@ const NOTIF_MESSAGES: Record<string, (payload: Record<string, string>) => { titl
     title: '❌ Request rejected',
     body: `Your reminder request for "${p.task_title}" was rejected.`,
   }),
+  request_cancelled: (p) => ({
+    title: '🚫 Request canceled',
+    body: `@${p.from_username} canceled their reminder request for "${p.task_title}".`,
+  }),
   reminder_sent: (p) => ({
     title: '🔔 Reminder received!',
     body: `@${p.from_username} is reminding you: "${p.task_title}"`,
