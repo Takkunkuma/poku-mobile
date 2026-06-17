@@ -6,6 +6,26 @@ rejects emojis).
 
 ---
 
+## 1.0.5
+
+What's new
+- You can now delete a task you created.
+- You can edit a reminder request after sending it: add more people, change the time, or cancel a request you sent by mistake. Changing the time asks everyone to approve again.
+- When you cancel a request, the person you canceled is notified.
+- You now get a notification when someone sends you a friend request, and when a friend accepts yours.
+- The Tasks header now shows the archive and add buttons as two separate circles to match the profile button.
+
+What to test
+1. Create a task, open it, and delete it. Confirm it disappears from your home list.
+2. Open a task you created and tap Edit. Try adding a friend, changing the time, and canceling one request. Confirm the changes save.
+3. After changing a task's time, confirm the people on it are asked to approve the new time again.
+4. Cancel a request and confirm the canceled person gets a notification.
+5. Send a friend request and confirm the other person gets a notification, then accept it and confirm you get one back.
+
+Found a bug or something confusing? Reply here or text me — screenshots help.
+
+---
+
 ## 1.0.4 (build 10)
 
 What's new
