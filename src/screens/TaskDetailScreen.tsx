@@ -1,13 +1,15 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import React, { useCallback, useLayoutEffect, useState } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
+import { Ionicons } from '@expo/vector-icons'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
 import { formatDateTime } from '@/lib/datetime'
+import { postComment } from '@/lib/comments'
 import DateTimeField from '@/components/DateTimeField'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
@@ -44,10 +46,10 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
   const [task, setTask] = useState<Task | null>(null)
   const [activeRequests, setActiveRequests] = useState<ActiveRequest[]>([])
   const [friends, setFriends] = useState<Friend[]>([])
+  const [commentCount, setCommentCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [marking, setMarking] = useState(false)
   const [notYetLoading, setNotYetLoading] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   // Re-request form state
   const [showReRequest, setShowReRequest] = useState(false)
@@ -63,7 +65,7 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
 
   async function fetchData() {
     if (!user) return
-    const [taskRes, requestRes, friendRes] = await Promise.all([
+    const [taskRes, requestRes, friendRes, commentRes] = await Promise.all([
       supabase.from('tasks').select('*').eq('id', taskId).single(),
       supabase
         .from('reminder_requests')
@@ -76,8 +78,13 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
         .select('requester:users!friendships_requester_id_fkey(id,username), addressee:users!friendships_addressee_id_fkey(id,username)')
         .eq('status', 'accepted')
         .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`),
+      supabase
+        .from('task_comments')
+        .select('id', { count: 'exact', head: true })
+        .eq('task_id', taskId),
     ])
     setTask(taskRes.data)
+    setCommentCount(commentRes.count ?? 0)
     setActiveRequests((requestRes.data ?? []) as unknown as ActiveRequest[])
     const raw = (friendRes.data ?? []) as unknown as Array<{ requester: Friend; addressee: Friend }>
     setFriends(raw.map(f => f.requester.id === user.id ? f.addressee : f.requester))
@@ -86,17 +93,39 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
 
   useFocusEffect(useCallback(() => { fetchData() }, [taskId, user]))
 
-  // Edit / Done toggle in the header, only while the task is still active.
+  // Native iOS pull-down menu anchored to the ⋯ header button: Edit + Delete.
+  // Completing lives on the always-visible card in the body, not here.
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () =>
-        task && task.status !== 'done' ? (
-          <TouchableOpacity onPress={() => { setEditMode(e => !e); setEditTime(null); setAddSelected([]) }} hitSlop={8}>
-            <Text style={{ color: '#f97316', fontSize: 16, fontWeight: editMode ? '600' : '400' }}>
-              {editMode ? 'Done' : 'Edit'}
-            </Text>
-          </TouchableOpacity>
-        ) : null,
+      unstable_headerRightItems: () =>
+        task && task.status !== 'done'
+          ? [
+              {
+                type: 'menu',
+                label: '',
+                icon: { type: 'sfSymbol', name: 'ellipsis' },
+                tintColor: '#6b7280',
+                accessibilityLabel: 'Task actions',
+                menu: {
+                  items: [
+                    {
+                      type: 'action',
+                      label: editMode ? 'Done editing' : 'Edit reminders',
+                      icon: { type: 'sfSymbol', name: 'pencil' },
+                      onPress: () => { setEditMode(e => !e); setEditTime(null); setAddSelected([]) },
+                    },
+                    {
+                      type: 'action',
+                      label: 'Delete task',
+                      icon: { type: 'sfSymbol', name: 'trash' },
+                      destructive: true,
+                      onPress: confirmDelete,
+                    },
+                  ],
+                },
+              },
+            ]
+          : [],
     })
   }, [navigation, task, editMode])
 
@@ -148,6 +177,17 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
         payload: { task_id: task.id, task_title: task.title, request_id: r.id, from_username: username },
       })
     ))
+    // Leave a visible trace in the thread so assignees see WHAT changed, not
+    // just that a re-approval landed in their inbox.
+    await postComment({
+      taskId: task.id,
+      taskTitle: task.title,
+      authorId: user!.id,
+      authorUsername: username ?? 'Someone',
+      body: `changed the reminder time to ${formatDateTime(editTime)}`,
+      system: true,
+      notify: false, // the reminder_request push above already covers it
+    })
     setEditTime(null)
     setSavingEdit(false)
     fetchData()
@@ -197,13 +237,11 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
 
   async function deleteTask() {
     if (!task) return
-    setDeleting(true)
     // No FK cascade is guaranteed, so clear the reminder requests first.
     await supabase.from('reminder_requests').delete().eq('task_id', task.id)
     // .select() so we can tell a real delete from an RLS-filtered no-op (which
     // returns success with zero rows and no error).
     const { data: deleted, error } = await supabase.from('tasks').delete().eq('id', task.id).select('id')
-    setDeleting(false)
     if (error || !deleted || deleted.length === 0) {
       Alert.alert('Couldn’t delete', 'Something went wrong. Please check your connection and try again.')
       return
@@ -369,248 +407,266 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
 
   const s = statusStyle[task.status] ?? statusStyle.open
   const isReminded = task.status === 'reminded'
-  const remindedRequest = activeRequests.find(r => r.status === 'sent' && (r.reminders_sent ?? 0) > 0)
+  const remindedRequest = activeRequests.find(r => (r.reminders_sent ?? 0) > 0)
   const pendingOrAccepted = activeRequests.filter(r => ['pending', 'accepted'].includes(r.status))
 
   const activeAssigneeIds = new Set(activeRequests.map(r => r.assignee?.id).filter(Boolean))
   const availableToAdd = friends.filter(f => !activeAssigneeIds.has(f.id))
   const editTimeValue = editTime ?? (activeRequests[0] ? new Date(activeRequests[0].scheduled_at) : new Date(Date.now() + 3600_000))
 
+  // Right-hand label for each row of the "people reminding you" list.
+  function requestRowLabel(req: ActiveRequest): { text: string; color: string } {
+    if ((req.reminders_sent ?? 0) > 0) return { text: 'poked you', color: '#ea580c' }
+    if (req.status === 'pending') return { text: 'pending', color: '#9ca3af' }
+    return { text: formatDateTime(req.scheduled_at), color: '#6b7280' }
+  }
+
   return (
-    <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
-      {/* Task card */}
-      <View className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <View className="flex-row items-start justify-between mb-3">
-          <Text className="text-xl font-bold text-gray-900 flex-1 pr-2">{task.title}</Text>
-          <View className={`rounded-full px-2 py-1 ${s.bg}`}>
+    <View className="flex-1 bg-gray-50">
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+        {/* Flat header — no card chrome */}
+        <Text className="text-2xl font-bold text-gray-900">{task.title}</Text>
+        <View className="flex-row items-center gap-2 mt-2">
+          <View className={`rounded-full px-2.5 py-1 ${s.bg}`}>
             <Text className={`text-xs font-medium ${s.text}`}>{task.status}</Text>
           </View>
-        </View>
-        {task.description ? <Text className="text-gray-600 text-sm mb-2">{task.description}</Text> : null}
-        {task.why ? (
-          <View className="bg-orange-50 rounded-2xl px-4 py-3 mb-2">
-            <Text className="text-orange-700 text-sm">💡 <Text className="font-bold">Why:</Text> {task.why}</Text>
+          <View
+            className="rounded-full px-2.5 py-1"
+            style={{ backgroundColor: difficultyColor(task.difficulty, 0.15) }}
+          >
+            <Text className="text-xs font-medium" style={{ color: difficultyTextColor(task.difficulty) }}>
+              {difficultyLabel(task.difficulty)}
+            </Text>
           </View>
-        ) : null}
-        <View
-          className="self-start rounded-full px-3 py-1"
-          style={{ backgroundColor: difficultyColor(task.difficulty, 0.15) }}
-        >
-          <Text className="text-xs font-medium" style={{ color: difficultyTextColor(task.difficulty) }}>
-            {difficultyLabel(task.difficulty)}
-          </Text>
         </View>
-      </View>
+        {task.description ? <Text className="text-gray-600 text-sm mt-3">{task.description}</Text> : null}
+        {task.why ? (
+          <Text className="text-gray-500 text-sm mt-2 italic">“{task.why}”</Text>
+        ) : null}
 
-      {/* Inline reminder editing (toggled via the header Edit button) */}
-      {editMode && task.status !== 'done' && (
-        <View className="bg-white rounded-2xl shadow-sm border border-orange-200 p-5 gap-4">
-          <Text className="font-bold text-gray-900">Edit reminders</Text>
+        {/* People reminding you — inset grouped list */}
+        {activeRequests.length > 0 && (
+          <View className="mt-6">
+            <Text className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 ml-1">
+              People reminding you
+            </Text>
+            <View className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              {activeRequests.map((req, i) => {
+                const label = requestRowLabel(req)
+                return (
+                  <View
+                    key={req.id}
+                    className={`flex-row items-center justify-between px-4 py-3 ${i > 0 ? 'border-t border-gray-100' : ''}`}
+                  >
+                    <View>
+                      <Text className="text-gray-900 font-medium">@{req.assignee?.username ?? '...'}</Text>
+                      <Text className="text-gray-400 text-xs mt-0.5">
+                        {req.repeat_count}× · every {formatInterval(req.interval_minutes)}
+                      </Text>
+                    </View>
+                    <Text className="text-xs font-medium" style={{ color: label.color }}>{label.text}</Text>
+                  </View>
+                )
+              })}
+            </View>
+          </View>
+        )}
 
-          {/* Change time for everyone */}
-          <View className="gap-2">
-            <Text className="text-sm font-semibold text-gray-700">Reminder time</Text>
-            <DateTimeField value={editTimeValue} onChange={setEditTime} minimumDate={new Date()} />
-            {editTime && (
+        {/* Done celebration */}
+        {task.status === 'done' && (
+          <View className="bg-green-50 border border-green-200 rounded-2xl p-6 items-center mt-6">
+            <Text className="text-3xl mb-2">🎉</Text>
+            <Text className="font-semibold text-green-700 text-center">Task complete! Points awarded.</Text>
+          </View>
+        )}
+
+        {/* Complete card — always visible while active. Quiet gray while
+            waiting; lights up orange once a reminder lands. */}
+        {task.status !== 'done' && (
+          isReminded ? (
+            <View className="bg-orange-50 border border-orange-300 rounded-2xl p-4 mt-6 gap-3">
+              <Text className="text-orange-700 text-sm font-medium">
+                {remindedRequest?.assignee?.username ? `@${remindedRequest.assignee.username}` : 'Your friend'} reminded you — did you get it done?
+              </Text>
+              <TouchableOpacity
+                onPress={markDone}
+                disabled={marking}
+                className="bg-green-500 rounded-xl py-3 items-center disabled:opacity-50"
+                activeOpacity={0.8}
+              >
+                {marking ? <ActivityIndicator color="#fff" /> : (
+                  <Text className="text-white font-semibold">Completed</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={markNotYet}
+                disabled={notYetLoading}
+                className="items-center py-1 disabled:opacity-50"
+                activeOpacity={0.7}
+              >
+                {notYetLoading ? <ActivityIndicator color="#f97316" size="small" /> : (
+                  <Text className="text-gray-500 text-sm font-medium">Not yet</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View className="bg-white border border-gray-200 rounded-2xl p-4 mt-6 gap-3">
+              <Text className="text-gray-400 text-sm">Done early? Mark it complete</Text>
+              <TouchableOpacity
+                onPress={markDone}
+                disabled={marking}
+                className="border border-gray-300 rounded-xl py-3 items-center disabled:opacity-50"
+                activeOpacity={0.7}
+              >
+                {marking ? <ActivityIndicator color="#6b7280" /> : (
+                  <Text className="text-gray-600 font-semibold">Completed</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )
+        )}
+
+        {/* Inline reminder editing (toggled via the ⋯ menu) */}
+        {editMode && task.status !== 'done' && (
+          <View className="bg-white rounded-2xl border border-orange-200 p-5 gap-4 mt-6">
+            <View className="flex-row items-center justify-between">
+              <Text className="font-bold text-gray-900">Edit reminders</Text>
+              <TouchableOpacity onPress={() => { setEditMode(false); setEditTime(null); setAddSelected([]) }} hitSlop={8}>
+                <Text className="text-orange-500 font-medium text-sm">Done</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Change time for everyone */}
+            <View className="gap-2">
+              <Text className="text-sm font-semibold text-gray-700">Reminder time</Text>
+              <DateTimeField value={editTimeValue} onChange={setEditTime} minimumDate={new Date()} />
+              {editTime && (
+                <>
+                  <Text className="text-orange-600 text-xs">Changing the time asks everyone to approve again.</Text>
+                  <TouchableOpacity
+                    onPress={applyTimeChange}
+                    disabled={savingEdit}
+                    className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
+                    activeOpacity={0.8}
+                  >
+                    {savingEdit ? <ActivityIndicator color="#fff" /> : (
+                      <Text className="text-white font-semibold text-sm">Apply new time</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
+            {/* Cancel existing requests */}
+            {activeRequests.length > 0 && (
+              <View className="gap-2 border-t border-gray-100 pt-3">
+                <Text className="text-sm font-semibold text-gray-700">People reminding you</Text>
+                {activeRequests.map(req => (
+                  <View key={req.id} className="flex-row items-center justify-between">
+                    <Text className="text-gray-800">@{req.assignee?.username ?? '...'}</Text>
+                    <TouchableOpacity onPress={() => cancelRequest(req)} disabled={savingEdit} className="px-3 py-1.5">
+                      <Text className="text-red-500 text-sm font-medium">Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Add more people */}
+            {availableToAdd.length > 0 && (
+              <View className="gap-2 border-t border-gray-100 pt-3">
+                <Text className="text-sm font-semibold text-gray-700">Add more people</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {availableToAdd.map(f => {
+                    const sel = addSelected.some(x => x.id === f.id)
+                    return (
+                      <TouchableOpacity
+                        key={f.id}
+                        onPress={() => setAddSelected(prev => sel ? prev.filter(x => x.id !== f.id) : [...prev, f])}
+                        className="rounded-full px-3 py-1.5 border"
+                        style={{ backgroundColor: sel ? '#f97316' : '#ffffff', borderColor: sel ? '#f97316' : '#e5e7eb' }}
+                        activeOpacity={0.7}
+                      >
+                        <Text className="text-sm font-medium" style={{ color: sel ? '#ffffff' : '#374151' }}>@{f.username}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+                {addSelected.length > 0 && (
+                  <TouchableOpacity
+                    onPress={addPeople}
+                    disabled={savingEdit}
+                    className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
+                    activeOpacity={0.8}
+                  >
+                    {savingEdit ? <ActivityIndicator color="#fff" /> : (
+                      <Text className="text-white font-semibold text-sm">
+                        Add {addSelected.length} {addSelected.length === 1 ? 'person' : 'people'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Re-request form — only after "Not yet" (adding people otherwise
+            lives behind ⋯ → Edit reminders) */}
+        {showReRequest && task.status !== 'done' && (
+          <View className="bg-white rounded-2xl border border-gray-100 p-5 gap-4 mt-6">
+            <Text className="font-semibold text-gray-900">
+              {showReRequest ? 'Ask someone to remind you again' : 'Ask a friend to remind you'}
+            </Text>
+            {!friends.length ? (
+              <Text className="text-gray-400 text-sm">No friends yet — add some in the Friends tab.</Text>
+            ) : (
               <>
-                <Text className="text-orange-600 text-xs">Changing the time asks everyone to approve again.</Text>
+                <View className="gap-2">
+                  {friends.map(f => {
+                    const selected = selectedFriend?.id === f.id
+                    return (
+                      <TouchableOpacity
+                        key={f.id}
+                        onPress={() => setSelectedFriend(f)}
+                        className={`flex-row items-center justify-between px-4 py-3 rounded-2xl border ${selected ? 'border-orange-400 bg-orange-50' : 'border-gray-200'}`}
+                        activeOpacity={0.7}
+                      >
+                        <Text className={`font-medium ${selected ? 'text-orange-700' : 'text-gray-700'}`}>@{f.username}</Text>
+                        {selected && <Text className="text-orange-500">✓</Text>}
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+                <DateTimeField value={scheduledAt} onChange={setScheduledAt} minimumDate={new Date()} />
                 <TouchableOpacity
-                  onPress={applyTimeChange}
-                  disabled={savingEdit}
-                  className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
+                  onPress={sendReRequest}
+                  disabled={sending || !selectedFriend}
+                  className="bg-orange-500 rounded-2xl py-4 items-center disabled:opacity-50"
                   activeOpacity={0.8}
                 >
-                  {savingEdit ? <ActivityIndicator color="#fff" /> : (
-                    <Text className="text-white font-semibold text-sm">Apply new time</Text>
+                  {sending ? <ActivityIndicator color="#fff" /> : (
+                    <Text className="text-white font-semibold">📨 Send Reminder Request</Text>
                   )}
                 </TouchableOpacity>
               </>
             )}
           </View>
+        )}
+      </ScrollView>
 
-          {/* Cancel existing requests */}
-          {activeRequests.length > 0 && (
-            <View className="gap-2 border-t border-gray-100 pt-3">
-              <Text className="text-sm font-semibold text-gray-700">People reminding you</Text>
-              {activeRequests.map(req => (
-                <View key={req.id} className="flex-row items-center justify-between">
-                  <Text className="text-gray-800">@{req.assignee?.username ?? '...'}</Text>
-                  <TouchableOpacity onPress={() => cancelRequest(req)} disabled={savingEdit} className="px-3 py-1.5">
-                    <Text className="text-red-500 text-sm font-medium">Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Add more people */}
-          {availableToAdd.length > 0 && (
-            <View className="gap-2 border-t border-gray-100 pt-3">
-              <Text className="text-sm font-semibold text-gray-700">Add more people</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {availableToAdd.map(f => {
-                  const sel = addSelected.some(x => x.id === f.id)
-                  return (
-                    <TouchableOpacity
-                      key={f.id}
-                      onPress={() => setAddSelected(prev => sel ? prev.filter(x => x.id !== f.id) : [...prev, f])}
-                      className="rounded-full px-3 py-1.5 border"
-                      style={{ backgroundColor: sel ? '#f97316' : '#ffffff', borderColor: sel ? '#f97316' : '#e5e7eb' }}
-                      activeOpacity={0.7}
-                    >
-                      <Text className="text-sm font-medium" style={{ color: sel ? '#ffffff' : '#374151' }}>@{f.username}</Text>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
-              {addSelected.length > 0 && (
-                <TouchableOpacity
-                  onPress={addPeople}
-                  disabled={savingEdit}
-                  className="bg-orange-500 rounded-2xl py-3 items-center disabled:opacity-50"
-                  activeOpacity={0.8}
-                >
-                  {savingEdit ? <ActivityIndicator color="#fff" /> : (
-                    <Text className="text-white font-semibold text-sm">
-                      Add {addSelected.length} {addSelected.length === 1 ? 'person' : 'people'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* Done */}
-      {task.status === 'done' && (
-        <View className="bg-green-50 border border-green-200 rounded-2xl p-6 items-center">
-          <Text className="text-3xl mb-2">🎉</Text>
-          <Text className="font-semibold text-green-700 text-center">Task complete! Points awarded.</Text>
-        </View>
-      )}
-
-      {/* Reminded — two options */}
-      {isReminded && (
-        <View className="bg-orange-50 border-2 border-orange-400 rounded-2xl p-5 gap-3">
-          <View>
-            <Text className="text-orange-700 font-semibold text-sm mb-1">
-              🔔 {remindedRequest?.assignee?.username ? `@${remindedRequest.assignee.username}` : 'Your friend'} reminded you!
-            </Text>
-            <Text className="text-orange-600 text-xs">Did you get this done?</Text>
-          </View>
-          <TouchableOpacity
-            onPress={markDone}
-            disabled={marking}
-            className="bg-green-500 rounded-2xl py-4 items-center disabled:opacity-50"
-            activeOpacity={0.8}
-          >
-            {marking ? <ActivityIndicator color="#fff" /> : (
-              <Text className="text-white font-bold text-base">✅ Yes, I completed this!</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={markNotYet}
-            disabled={notYetLoading}
-            className="bg-white border border-orange-200 rounded-2xl py-4 items-center disabled:opacity-50"
-            activeOpacity={0.7}
-          >
-            {notYetLoading ? <ActivityIndicator color="#f97316" /> : (
-              <Text className="text-orange-500 font-semibold text-base">❌ Not yet done</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Active requests list */}
-      {pendingOrAccepted.length > 0 && (
-        <View className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <Text className="font-semibold text-gray-900 mb-3">Reminder requests</Text>
-          {pendingOrAccepted.map(req => (
-            <View key={req.id} className="flex-row items-center justify-between py-2 border-b border-gray-50">
-              <View>
-                <Text className="text-gray-800 font-medium">@{req.assignee?.username ?? '...'}</Text>
-                <Text className="text-gray-400 text-xs">
-                  {req.repeat_count}× · every {formatInterval(req.interval_minutes)} · {formatDateTime(req.scheduled_at)}
-                </Text>
-              </View>
-              <View className={`rounded-full px-2 py-0.5 ${req.status === 'accepted' ? 'bg-blue-100' : 'bg-yellow-100'}`}>
-                <Text className={`text-xs font-medium ${req.status === 'accepted' ? 'text-blue-700' : 'text-yellow-700'}`}>
-                  {req.status}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Re-request form — shown after "Not yet" or when open with no requests */}
-      {(showReRequest || (task.status === 'open' && pendingOrAccepted.length === 0)) && task.status !== 'done' && (
-        <View className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 gap-4">
-          <Text className="font-semibold text-gray-900">
-            {showReRequest ? 'Ask someone to remind you again' : 'Ask a friend to remind you'}
-          </Text>
-          {!friends.length ? (
-            <Text className="text-gray-400 text-sm">No friends yet — add some in the Friends tab.</Text>
-          ) : (
-            <>
-              <View className="gap-2">
-                {friends.map(f => {
-                  const selected = selectedFriend?.id === f.id
-                  return (
-                    <TouchableOpacity
-                      key={f.id}
-                      onPress={() => setSelectedFriend(f)}
-                      className={`flex-row items-center justify-between px-4 py-3 rounded-2xl border ${selected ? 'border-orange-400 bg-orange-50' : 'border-gray-200'}`}
-                      activeOpacity={0.7}
-                    >
-                      <Text className={`font-medium ${selected ? 'text-orange-700' : 'text-gray-700'}`}>@{f.username}</Text>
-                      {selected && <Text className="text-orange-500">✓</Text>}
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
-              <DateTimeField value={scheduledAt} onChange={setScheduledAt} minimumDate={new Date()} />
-              <TouchableOpacity
-                onPress={sendReRequest}
-                disabled={sending || !selectedFriend}
-                className="bg-orange-500 rounded-2xl py-4 items-center disabled:opacity-50"
-                activeOpacity={0.8}
-              >
-                {sending ? <ActivityIndicator color="#fff" /> : (
-                  <Text className="text-white font-semibold">📨 Send Reminder Request</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      )}
-
-      {/* Manual complete (open, no reminders) */}
-      {task.status === 'open' && (
+      {/* Bottom toolbar — comments entry point */}
+      <View className="flex-row items-center border-t border-gray-200 bg-white px-5 pt-3 pb-8">
         <TouchableOpacity
-          onPress={markDone}
-          disabled={marking}
-          className="border border-gray-200 bg-white rounded-2xl py-4 items-center disabled:opacity-50"
+          onPress={() => navigation.navigate('Comments', { taskId: task.id, taskTitle: task.title })}
+          className="flex-row items-center gap-1.5"
+          hitSlop={8}
           activeOpacity={0.7}
         >
-          {marking ? <ActivityIndicator color="#6b7280" /> : (
-            <Text className="text-gray-500 text-sm font-medium">Mark as complete</Text>
-          )}
+          <Ionicons name="chatbubble-outline" size={22} color="#3b82f6" />
+          {commentCount > 0 && <Text className="text-blue-500 font-medium text-sm">{commentCount}</Text>}
         </TouchableOpacity>
-      )}
-
-      {/* Delete task */}
-      <TouchableOpacity
-        onPress={confirmDelete}
-        disabled={deleting}
-        className="py-4 items-center mt-2 disabled:opacity-50"
-        activeOpacity={0.7}
-      >
-        {deleting ? <ActivityIndicator color="#ef4444" /> : (
-          <Text className="text-red-500 text-sm font-medium">🗑 Delete task</Text>
-        )}
-      </TouchableOpacity>
-    </ScrollView>
+      </View>
+    </View>
   )
 }

@@ -3,11 +3,12 @@ import {
   View, Text, FlatList, TouchableOpacity, RefreshControl,
   ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform, StyleSheet, Alert,
 } from 'react-native'
-import { useRoute, type RouteProp } from '@react-navigation/native'
+import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
 import { formatDateTime } from '@/lib/datetime'
+import { postComment } from '@/lib/comments'
 import type { TabParamList } from '@/navigation/AppNavigator'
 
 type Request = {
@@ -64,6 +65,15 @@ const segStyles = StyleSheet.create({
 export default function InboxScreen() {
   const { user, username } = useAuth()
   const route = useRoute<RouteProp<TabParamList, 'Inbox'>>()
+  const navigation = useNavigation<any>()
+
+  // Comments live in the Dashboard stack — hop tabs to open the thread.
+  function openComments(req: Request) {
+    navigation.navigate('DashboardTab', {
+      screen: 'Comments',
+      params: { taskId: req.task_id, taskTitle: req.task?.title },
+    })
+  }
   const [requests, setRequests] = useState<Request[]>([])
   const [completions, setCompletions] = useState<CompletionNotif[]>([])
   const [loading, setLoading] = useState<string | null>(null)
@@ -71,7 +81,7 @@ export default function InboxScreen() {
   const [fetching, setFetching] = useState(true)
 
   // Rejection modal
-  const [rejectTarget, setRejectTarget] = useState<{ id: string; requesterId: string; taskTitle: string } | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; requesterId: string; taskId: string; taskTitle: string } | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
 
   const [tab, setTab] = useState<TabKey>('requests')
@@ -172,6 +182,18 @@ export default function InboxScreen() {
         rejection_reason: rejectionReason.trim(),
       },
     })
+    // Keep the "why" visible in the thread instead of a one-shot alert.
+    // notify:false — the request_rejected push above already carries the reason.
+    const reason = rejectionReason.trim()
+    await postComment({
+      taskId: rejectTarget.taskId,
+      taskTitle,
+      authorId: user!.id,
+      authorUsername: username ?? 'Someone',
+      body: reason ? `declined the request — "${reason}"` : 'declined the request',
+      system: true,
+      notify: false,
+    })
     setLoading(null)
     setRejectTarget(null)
     setRejectionReason('')
@@ -268,8 +290,13 @@ export default function InboxScreen() {
                   <Text className="text-xs text-gray-400 mb-1">from @{req.requester?.username}</Text>
                   <Text className="font-semibold text-gray-900">{req.task?.title}</Text>
                 </View>
-                <View className={`rounded-full px-2 py-0.5 ${sc.bg}`}>
-                  <Text className={`text-xs font-medium ${sc.text}`}>{req.status}</Text>
+                <View className="flex-row items-center gap-2">
+                  <TouchableOpacity onPress={() => openComments(req)} hitSlop={8}>
+                    <Text className="text-sm">💬</Text>
+                  </TouchableOpacity>
+                  <View className={`rounded-full px-2 py-0.5 ${sc.bg}`}>
+                    <Text className={`text-xs font-medium ${sc.text}`}>{req.status}</Text>
+                  </View>
                 </View>
               </View>
 
@@ -304,7 +331,7 @@ export default function InboxScreen() {
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => setRejectTarget({ id: req.id, requesterId: req.requester_id, taskTitle: req.task.title })}
+                    onPress={() => setRejectTarget({ id: req.id, requesterId: req.requester_id, taskId: req.task_id, taskTitle: req.task.title })}
                     disabled={isLoading}
                     className="flex-1 bg-gray-100 rounded-2xl py-2.5 items-center disabled:opacity-50"
                     activeOpacity={0.8}

@@ -8,6 +8,7 @@ export const navigationRef = createNavigationContainerRef<TabParamList>()
 type NotificationData = {
   type?: string
   task_id?: string
+  task_title?: string
   [key: string]: unknown
 } | null | undefined
 
@@ -49,6 +50,16 @@ export function routeFromNotification(data: NotificationData): void {
     case 'friend_request':
     case 'friend_accepted':
       navigationRef.navigate('Friends')
+      break
+
+    // Someone commented on a task you're part of → open the thread.
+    case 'task_comment':
+      if (taskId) {
+        navigationRef.navigate('DashboardTab', {
+          screen: 'Comments',
+          params: { taskId, taskTitle: typeof data.task_title === 'string' ? data.task_title : undefined },
+        })
+      }
       break
   }
 }

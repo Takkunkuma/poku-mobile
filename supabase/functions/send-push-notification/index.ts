@@ -46,6 +46,10 @@ const NOTIF_MESSAGES: Record<string, (p: Record<string, string>) => { title: str
     title: '🤝 Friend added',
     body: `@${p.from_username} accepted your friend request!`,
   }),
+  task_comment: (p) => ({
+    title: '💬 New comment',
+    body: `@${p.from_username} on "${p.task_title}": ${p.snippet}`,
+  }),
 }
 
 Deno.serve(async (req) => {

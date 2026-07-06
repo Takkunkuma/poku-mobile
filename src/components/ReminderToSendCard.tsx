@@ -23,11 +23,12 @@ type Props = {
   now: number
   isLoading: boolean
   onSend: (req: ReminderRequest) => void
+  onOpenComments?: (req: ReminderRequest) => void
 }
 
 // A reminder you've accepted and owe to a friend, with a live countdown to the
 // next send time. Blue when due, orange once overdue past the grace window.
-export default function ReminderToSendCard({ req, now, isLoading, onSend }: Props) {
+export default function ReminderToSendCard({ req, now, isLoading, onSend, onOpenComments }: Props) {
   const remindersDone = req.reminders_sent ?? 0
   const nextOrdinal = ordinal(remindersDone + 1)
 
@@ -44,7 +45,14 @@ export default function ReminderToSendCard({ req, now, isLoading, onSend }: Prop
 
   return (
     <View className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 mb-3">
-      <Text className="text-xs text-gray-400 mb-1">remind @{req.requester?.username}</Text>
+      <View className="flex-row items-start justify-between">
+        <Text className="text-xs text-gray-400 mb-1">remind @{req.requester?.username}</Text>
+        {onOpenComments && (
+          <TouchableOpacity onPress={() => onOpenComments(req)} hitSlop={8}>
+            <Text className="text-sm">💬</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       <Text className="font-semibold text-gray-900">{req.task?.title}</Text>
       {req.task?.why ? <Text className="text-orange-600 text-xs mt-1">💡 {req.task.why}</Text> : null}
 

@@ -276,6 +276,7 @@ export default function DashboardScreen() {
                 now={now}
                 isLoading={sendingId === req.id}
                 onSend={sendReminder}
+                onOpenComments={(r) => navigation.navigate('Comments', { taskId: r.task_id, taskTitle: r.task?.title })}
               />
             )
           }

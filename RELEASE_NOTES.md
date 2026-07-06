@@ -6,6 +6,26 @@ rejects emojis).
 
 ---
 
+## 1.0.7
+
+What's new
+- Comments: every task now has a shared comment thread between you and everyone reminding you. Open it from the comment bubble at the bottom of the task screen. Comments arrive live, and everyone on the task gets a notification when someone comments.
+- The thread also records what happens automatically: when the task owner changes the reminder time, or when someone declines a request with a reason, it shows up in the thread so nothing is hidden.
+- The task screen got a full redesign. Task info sits flat at the top, the people reminding you are a clean list, and Edit and Delete moved into a menu behind the three dots at the top right.
+- The Completed button is now always on the task screen: quiet gray while you wait, and it lights up orange with a "Not yet" option once someone reminds you.
+
+What to test
+1. Open a task and tap the comment bubble at the bottom. The thread should slide up as a sheet with the text box at the very bottom.
+2. Post a comment and confirm the other people on the task get a notification, and that tapping it opens the thread.
+3. With a second account, decline a request with a reason and confirm the reason appears in the thread.
+4. Change a task's reminder time from the three-dot menu and confirm the change appears in the thread.
+5. Try the three-dot menu at the top right: Edit reminders and Delete task.
+6. Confirm the Completed button is gray before any reminder and turns orange with "Not yet" after someone pokes you.
+
+Found a bug or something confusing? Reply here or text me. Screenshots help.
+
+---
+
 ## 1.0.6
 
 What's new

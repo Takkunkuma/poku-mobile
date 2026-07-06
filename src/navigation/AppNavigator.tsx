@@ -15,6 +15,7 @@ import InboxScreen from '@/screens/InboxScreen'
 import FriendsScreen from '@/screens/FriendsScreen'
 import ProfileScreen from '@/screens/ProfileScreen'
 import ArchiveScreen from '@/screens/ArchiveScreen'
+import CommentsScreen from '@/screens/CommentsScreen'
 
 // ── Param list types ────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export type DashboardStackParamList = {
   NewTask: undefined
   Profile: undefined
   Archive: undefined
+  Comments: { taskId: string; taskTitle?: string }
 }
 
 export type InboxTabKey = 'requests' | 'past' | 'completed'
@@ -60,6 +62,18 @@ function DashboardStackNavigator() {
       <DashboardStack.Screen name="NewTask" component={NewTaskScreen} options={{ title: 'New Task', headerBackTitle: 'Back' }} />
       <DashboardStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
       <DashboardStack.Screen name="Archive" component={ArchiveScreen} options={{ title: 'Past Tasks' }} />
+      <DashboardStack.Screen
+        name="Comments"
+        component={CommentsScreen}
+        options={{
+          title: 'Comments',
+          // iOS modal sheet: slides up over the task, swipe down to dismiss.
+          // pageSheet (not formSheet) — formSheet's detent container doesn't
+          // give flex children their full height, which pinned the thread and
+          // composer to the top of the sheet.
+          presentation: 'pageSheet',
+        }}
+      />
     </DashboardStack.Navigator>
   )
 }

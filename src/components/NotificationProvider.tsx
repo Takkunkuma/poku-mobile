@@ -46,6 +46,10 @@ const NOTIF_MESSAGES: Record<string, (payload: Record<string, string>) => { titl
     title: '🤝 Friend added',
     body: `@${p.from_username} accepted your friend request!`,
   }),
+  task_comment: (p) => ({
+    title: '💬 New comment',
+    body: `@${p.from_username} on "${p.task_title}": ${p.snippet}`,
+  }),
 }
 
 export default function NotificationProvider({ children }: { children: React.ReactNode }) {
