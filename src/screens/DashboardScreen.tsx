@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import {
-  View, Text, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator,
+  View, Text, SectionList, TouchableOpacity, RefreshControl, ActivityIndicator, Alert,
 } from 'react-native'
 import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -9,6 +9,8 @@ import * as SecureStore from 'expo-secure-store'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { difficultyColor } from '@/lib/difficulty'
+import { scheduleLocalNotification } from '@/lib/notifications'
+import ReminderToSendCard, { type ReminderRequest } from '@/components/ReminderToSendCard'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
 type Task = {
@@ -44,10 +46,19 @@ export default function DashboardScreen() {
   const { user, username, refreshProfile } = useAuth()
   const navigation = useNavigation<Nav>()
   const [tasks, setTasks] = useState<Task[]>([])
+  const [reminders, setReminders] = useState<ReminderRequest[]>([])
   const [pokes, setPokes] = useState<Map<string, number>>(new Map())
   const [showPokeWord, setShowPokeWord] = useState(true)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [sendingId, setSendingId] = useState<string | null>(null)
+
+  // Ticks once a second to drive the live "send reminder" countdown.
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   // Resolve whether to show the "pokes" word, bumping the seen-counter once.
   useEffect(() => {
@@ -74,6 +85,21 @@ export default function DashboardScreen() {
     setTasks(data ?? [])
   }
 
+  // Reminders I've accepted and still owe to a friend — these show on Home with
+  // a live countdown + send button (the "remind your friend" half of the app).
+  async function fetchReminders() {
+    if (!user) return
+    const { data } = await supabase
+      .from('reminder_requests')
+      .select('id, task_id, status, scheduled_at, requester_id, repeat_count, reminders_sent, notification_type, interval_minutes, task:tasks(id,title,why,difficulty), requester:users!reminder_requests_requester_id_fkey(username)')
+      .eq('assignee_id', user.id)
+      .eq('status', 'accepted')
+      .order('scheduled_at', { ascending: true })
+    const rows = (data ?? []) as unknown as ReminderRequest[]
+    // Only those with reminders still left to send are actionable.
+    setReminders(rows.filter(r => (r.repeat_count ?? 1) - (r.reminders_sent ?? 0) > 0))
+  }
+
   // Total pokes per task = sum of reminders actually sent to me across all
   // the friends I asked. Resets naturally when the task is completed (it leaves
   // the active list).
@@ -91,7 +117,7 @@ export default function DashboardScreen() {
   }
 
   async function load() {
-    await Promise.all([fetchTasks(), fetchPokes()])
+    await Promise.all([fetchTasks(), fetchReminders(), fetchPokes()])
     setLoading(false)
     setRefreshing(false)
   }
@@ -101,10 +127,54 @@ export default function DashboardScreen() {
     refreshProfile()
   }, [user]))
 
+  // Send the next reminder to the friend who asked you. Moved here from the
+  // Inbox so Home is the single place you act on reminders you owe.
+  async function sendReminder(req: ReminderRequest) {
+    setSendingId(req.id)
+    const newCount = (req.reminders_sent ?? 0) + 1
+    const isLast = newCount >= (req.repeat_count ?? 1)
+
+    const { error: updateError } = await supabase
+      .from('reminder_requests')
+      .update({ reminders_sent: newCount, status: isLast ? 'sent' : 'accepted' })
+      .eq('id', req.id)
+
+    if (updateError) {
+      setSendingId(null)
+      Alert.alert('Couldn’t send reminder', 'Something went wrong. Please check your connection and try again.')
+      return
+    }
+
+    await supabase.from('tasks').update({ status: 'reminded' }).eq('id', req.task_id)
+
+    const { error: notifError } = await supabase.from('notifications').insert({
+      recipient_id: req.requester_id,
+      type: 'reminder_sent',
+      payload: {
+        task_title: req.task.title,
+        from_user_id: user!.id,
+        from_username: username,
+        task_id: req.task_id,
+        notification_type: req.notification_type,
+      },
+    })
+
+    await scheduleLocalNotification(
+      'Reminder sent!',
+      `You reminded @${req.requester.username} about "${req.task.title}"`,
+    )
+    setSendingId(null)
+    fetchReminders()
+
+    if (notifError) {
+      Alert.alert('Reminder recorded', `It counted, but @${req.requester.username} may not have gotten a push notification.`)
+    }
+  }
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      title: 'My Tasks',
+      title: 'Home',
       headerLargeTitle: true,
       headerLargeTitleShadowVisible: false,
       headerLeft: () => (
@@ -138,11 +208,12 @@ export default function DashboardScreen() {
     })
   }, [navigation])
 
-  // Realtime — a new poke bumps the count and flips the task to "reminded".
+  // Realtime — a new poke bumps the count and flips the task to "reminded";
+  // changes to reminders I owe keep the "Reminders to send" section fresh.
   useEffect(() => {
     if (!user) return
     const channel = supabase
-      .channel('dashboard-reminders')
+      .channel('home-updates')
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'notifications',
         filter: `recipient_id=eq.${user.id}`,
@@ -153,6 +224,10 @@ export default function DashboardScreen() {
           setTasks(prev => prev.map(t => t.id === n.payload.task_id ? { ...t, status: 'reminded' } : t))
         }
       })
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'reminder_requests',
+        filter: `assignee_id=eq.${user.id}`,
+      }, () => fetchReminders())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])
@@ -161,15 +236,21 @@ export default function DashboardScreen() {
     return <View className="flex-1 items-center justify-center"><ActivityIndicator size="large" color="#f97316" /></View>
   }
 
+  const sections = [
+    ...(reminders.length ? [{ key: 'reminders' as const, title: 'Reminders to send', data: reminders }] : []),
+    { key: 'tasks' as const, title: 'Your tasks', data: tasks },
+  ]
+
   return (
     <View className="flex-1 bg-gray-50">
-      <FlatList
-        data={tasks}
-        keyExtractor={t => t.id}
+      <SectionList
+        sections={sections as any}
+        keyExtractor={(item: any) => item.id}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 32 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+        stickySectionHeadersEnabled={false}
         ListHeaderComponent={
-          username ? <Text style={{ fontSize: 13, color: '#9ca3af', marginBottom: 4 }}>@{username}</Text> : null
+          username ? <Text style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>@{username}</Text> : null
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load() }} tintColor="#f97316" />}
         ListEmptyComponent={
@@ -178,14 +259,35 @@ export default function DashboardScreen() {
             <Text className="text-gray-400 text-center">No tasks yet. Create your first one!</Text>
           </View>
         }
-        renderItem={({ item: task }) => {
+        // Only label sections when both are present, so a lone task list stays clean.
+        renderSectionHeader={({ section }: any) =>
+          reminders.length > 0 ? (
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: section.key === 'tasks' ? 20 : 0, marginBottom: 8 }}>
+              {section.title}
+            </Text>
+          ) : null
+        }
+        renderItem={({ item, section }: any) => {
+          if (section.key === 'reminders') {
+            const req = item as ReminderRequest
+            return (
+              <ReminderToSendCard
+                req={req}
+                now={now}
+                isLoading={sendingId === req.id}
+                onSend={sendReminder}
+              />
+            )
+          }
+
+          const task = item as Task
           const isReminded = task.status === 'reminded'
           const pokeCount = pokes.get(task.id) ?? 0
 
           return (
             <TouchableOpacity
               onPress={() => navigation.navigate('TaskDetail', { taskId: task.id })}
-              className="rounded-2xl p-4 border"
+              className="rounded-2xl p-4 border mb-3"
               style={{
                 backgroundColor: difficultyColor(task.difficulty, 0.15),
                 borderColor: difficultyColor(task.difficulty, 0.5),

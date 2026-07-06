@@ -4,10 +4,11 @@ import {
 } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
-import DateTimePicker from '@react-native-community/datetimepicker'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
+import { formatDateTime } from '@/lib/datetime'
+import DateTimeField from '@/components/DateTimeField'
 import type { DashboardStackParamList } from '@/navigation/AppNavigator'
 
 type Props = NativeStackScreenProps<DashboardStackParamList, 'TaskDetail'>
@@ -52,13 +53,11 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
   const [showReRequest, setShowReRequest] = useState(false)
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null)
   const [scheduledAt, setScheduledAt] = useState(new Date(Date.now() + 3600_000))
-  const [showPicker, setShowPicker] = useState(false)
   const [sending, setSending] = useState(false)
 
   // Inline reminder editing
   const [editMode, setEditMode] = useState(false)
   const [editTime, setEditTime] = useState<Date | null>(null)
-  const [showEditPicker, setShowEditPicker] = useState(false)
   const [addSelected, setAddSelected] = useState<Friend[]>([])
   const [savingEdit, setSavingEdit] = useState(false)
 
@@ -411,21 +410,7 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
           {/* Change time for everyone */}
           <View className="gap-2">
             <Text className="text-sm font-semibold text-gray-700">Reminder time</Text>
-            <TouchableOpacity
-              onPress={() => setShowEditPicker(true)}
-              className="border border-gray-200 rounded-2xl px-4 py-3"
-              activeOpacity={0.7}
-            >
-              <Text className="text-gray-700 text-sm">{editTimeValue.toLocaleString()}</Text>
-            </TouchableOpacity>
-            {showEditPicker && (
-              <DateTimePicker
-                value={editTimeValue}
-                mode="datetime"
-                minimumDate={new Date()}
-                onChange={(_, date) => { setShowEditPicker(false); if (date) setEditTime(date) }}
-              />
-            )}
+            <DateTimeField value={editTimeValue} onChange={setEditTime} minimumDate={new Date()} />
             {editTime && (
               <>
                 <Text className="text-orange-600 text-xs">Changing the time asks everyone to approve again.</Text>
@@ -546,7 +531,7 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
               <View>
                 <Text className="text-gray-800 font-medium">@{req.assignee?.username ?? '...'}</Text>
                 <Text className="text-gray-400 text-xs">
-                  {req.repeat_count}× · every {formatInterval(req.interval_minutes)} · {new Date(req.scheduled_at).toLocaleString()}
+                  {req.repeat_count}× · every {formatInterval(req.interval_minutes)} · {formatDateTime(req.scheduled_at)}
                 </Text>
               </View>
               <View className={`rounded-full px-2 py-0.5 ${req.status === 'accepted' ? 'bg-blue-100' : 'bg-yellow-100'}`}>
@@ -585,21 +570,7 @@ export default function TaskDetailScreen({ route, navigation }: Props) {
                   )
                 })}
               </View>
-              <TouchableOpacity
-                onPress={() => setShowPicker(true)}
-                className="border border-gray-200 rounded-2xl px-4 py-3"
-                activeOpacity={0.7}
-              >
-                <Text className="text-gray-700 text-sm">{scheduledAt.toLocaleString()}</Text>
-              </TouchableOpacity>
-              {showPicker && (
-                <DateTimePicker
-                  value={scheduledAt}
-                  mode="datetime"
-                  minimumDate={new Date()}
-                  onChange={(_, date) => { setShowPicker(false); if (date) setScheduledAt(date) }}
-                />
-              )}
+              <DateTimeField value={scheduledAt} onChange={setScheduledAt} minimumDate={new Date()} />
               <TouchableOpacity
                 onPress={sendReRequest}
                 disabled={sending || !selectedFriend}

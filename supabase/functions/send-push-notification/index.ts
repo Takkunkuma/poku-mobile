@@ -97,6 +97,8 @@ Deno.serve(async (req) => {
         sound: 'default',
         priority: 'high',
         interruptionLevel: 'time-sensitive',
+        // Carried through to the app so a tap deep-links to the right screen.
+        data: { type, ...payload },
       }),
     })
 

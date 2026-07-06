@@ -1,8 +1,9 @@
 import React from 'react'
-import { NavigationContainer } from '@react-navigation/native'
+import { NavigationContainer, type NavigatorScreenParams } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { Ionicons } from '@expo/vector-icons'
+import { navigationRef } from '@/navigation/navigationRef'
 
 import { useAuth } from '@/context/AuthContext'
 import LandingScreen from '@/screens/LandingScreen'
@@ -30,9 +31,11 @@ export type DashboardStackParamList = {
   Archive: undefined
 }
 
-type TabParamList = {
-  DashboardTab: undefined
-  Inbox: undefined
+export type InboxTabKey = 'requests' | 'past' | 'completed'
+
+export type TabParamList = {
+  DashboardTab: NavigatorScreenParams<DashboardStackParamList> | undefined
+  Inbox: { tab?: InboxTabKey } | undefined
   Friends: undefined
 }
 
@@ -72,7 +75,7 @@ function AppTabs() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
         tabBarIcon: ({ focused, color, size }) => {
           const icons: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
-            DashboardTab: { active: 'checkmark-circle',        inactive: 'checkmark-circle-outline' },
+            DashboardTab: { active: 'home',                    inactive: 'home-outline' },
             Inbox:        { active: 'mail',                    inactive: 'mail-outline' },
             Friends:      { active: 'people',                  inactive: 'people-outline' },
           }
@@ -81,7 +84,7 @@ function AppTabs() {
         },
       })}
     >
-      <Tab.Screen name="DashboardTab" component={DashboardStackNavigator} options={{ headerShown: false, title: 'Tasks' }} />
+      <Tab.Screen name="DashboardTab" component={DashboardStackNavigator} options={{ headerShown: false, title: 'Home' }} />
       <Tab.Screen name="Inbox"        component={InboxScreen}             options={{ title: 'Inbox' }} />
       <Tab.Screen name="Friends"      component={FriendsScreen}           options={{ title: 'Friends' }} />
     </Tab.Navigator>
@@ -99,7 +102,7 @@ export default function AppNavigator() {
   const hasUsername = !!username
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       {!isAuthed ? (
         <AuthStack.Navigator screenOptions={{ headerShown: false }}>
           <AuthStack.Screen name="Landing" component={LandingScreen} />

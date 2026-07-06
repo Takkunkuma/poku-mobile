@@ -85,9 +85,13 @@ export async function registerForPushNotifications(): Promise<string | null> {
   return token
 }
 
-export async function scheduleLocalNotification(title: string, body: string) {
+export async function scheduleLocalNotification(
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {},
+) {
   await Notifications.scheduleNotificationAsync({
-    content: { title, body, sound: true },
+    content: { title, body, sound: true, data },
     trigger: null,
   })
 }

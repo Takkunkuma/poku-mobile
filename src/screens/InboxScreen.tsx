@@ -3,10 +3,12 @@ import {
   View, Text, FlatList, TouchableOpacity, RefreshControl,
   ActivityIndicator, TextInput, Modal, KeyboardAvoidingView, Platform, StyleSheet, Alert,
 } from 'react-native'
+import { useRoute, type RouteProp } from '@react-navigation/native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { scheduleLocalNotification } from '@/lib/notifications'
 import { difficultyColor, difficultyTextColor, difficultyLabel } from '@/lib/difficulty'
+import { formatDateTime } from '@/lib/datetime'
+import type { TabParamList } from '@/navigation/AppNavigator'
 
 type Request = {
   id: string; task_id: string; status: string; scheduled_at: string; requester_id: string
@@ -18,28 +20,6 @@ type CompletionNotif = {
   id: string; created_at: string
   payload: { task_title: string; owner_username: string; points_earned?: string }
 }
-
-function ordinal(n: number): string {
-  const s = ['th', 'st', 'nd', 'rd']
-  const v = n % 100
-  return n + (s[(v - 20) % 10] || s[v] || s[0])
-}
-
-// Countdown string that drops leading zero-units as time runs out:
-// "2d 4h 13m 50s" -> "4h 13m 50s" -> "13m 50s" -> "50s"
-function formatCountdown(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  const d = Math.floor(s / 86400)
-  const h = Math.floor((s % 86400) / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  if (d > 0) return `${d}d ${h}h ${m}m ${sec}s`
-  if (h > 0) return `${h}h ${m}m ${sec}s`
-  if (m > 0) return `${m}m ${sec}s`
-  return `${sec}s`
-}
-
-const OVERDUE_GRACE_MS = 60_000
 
 const TABS = [
   { key: 'requests',  label: 'Requests' },
@@ -83,6 +63,7 @@ const segStyles = StyleSheet.create({
 
 export default function InboxScreen() {
   const { user, username } = useAuth()
+  const route = useRoute<RouteProp<TabParamList, 'Inbox'>>()
   const [requests, setRequests] = useState<Request[]>([])
   const [completions, setCompletions] = useState<CompletionNotif[]>([])
   const [loading, setLoading] = useState<string | null>(null)
@@ -95,12 +76,11 @@ export default function InboxScreen() {
 
   const [tab, setTab] = useState<TabKey>('requests')
 
-  // Ticks once a second to drive the live "send reminder" countdown.
-  const [now, setNow] = useState(Date.now())
+  // A notification tap can deep-link to a specific tab (e.g. task_done →
+  // Completed). Honor the param whenever it changes.
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
+    if (route.params?.tab) setTab(route.params.tab)
+  }, [route.params?.tab])
 
   async function fetchData() {
     if (!user) return
@@ -198,60 +178,18 @@ export default function InboxScreen() {
     fetchData()
   }
 
-  async function sendReminder(req: Request) {
-    setLoading(req.id)
-    const newCount = (req.reminders_sent ?? 0) + 1
-    const isLast = newCount >= (req.repeat_count ?? 1)
-
-    // Core write: record that the reminder was sent. If this fails, nothing
-    // happened — bail out and tell the user instead of falsely showing "sent".
-    const { error: updateError } = await supabase
-      .from('reminder_requests')
-      .update({ reminders_sent: newCount, status: isLast ? 'sent' : 'accepted' })
-      .eq('id', req.id)
-
-    if (updateError) {
-      setLoading(null)
-      Alert.alert('Couldn’t send reminder', 'Something went wrong. Please check your connection and try again.')
-      return
-    }
-
-    await supabase.from('tasks').update({ status: 'reminded' }).eq('id', req.task_id)
-
-    // Notification delivers the push to your friend. If it fails, the reminder
-    // still counted, but they may not get a push — let the sender know.
-    const { error: notifError } = await supabase.from('notifications').insert({
-      recipient_id: req.requester_id,
-      type: 'reminder_sent',
-      payload: {
-        task_title: req.task.title,
-        from_user_id: user!.id,
-        from_username: username,
-        task_id: req.task_id,
-        notification_type: req.notification_type,
-      },
-    })
-
-    await scheduleLocalNotification('Reminder sent!', `You reminded @${req.requester.username} about "${req.task.title}"`)
-    setLoading(null)
-    fetchData()
-
-    if (notifError) {
-      Alert.alert('Reminder recorded', `It counted, but @${req.requester.username} may not have gotten a push notification.`)
-    }
-  }
-
+  // "Requests" is now only incoming requests awaiting your accept/reject —
+  // accepted reminders you owe live on Home, where you send them.
   const pending  = requests.filter(r => r.status === 'pending')
-  const accepted = requests.filter(r => r.status === 'accepted')
   const past     = requests.filter(r => ['rejected', 'sent'].includes(r.status))
 
   const tabCounts: Record<TabKey, number> = {
-    requests: pending.length + accepted.length,
+    requests: pending.length,
     past: past.length,
     completed: completions.length,
   }
   const tabData: (Request | CompletionNotif)[] =
-    tab === 'requests' ? [...pending, ...accepted]
+    tab === 'requests' ? pending
     : tab === 'past' ? past
     : completions
 
@@ -305,7 +243,7 @@ export default function InboxScreen() {
                   @{n.payload.owner_username} completed "{n.payload.task_title}"
                 </Text>
                 <Text className="text-green-500 text-xs mt-0.5">
-                  {n.payload.points_earned ? `+${n.payload.points_earned} pts` : '+points'} 🏆 · {new Date(n.created_at).toLocaleString()}
+                  {n.payload.points_earned ? `+${n.payload.points_earned} pts` : '+points'} 🏆 · {formatDateTime(n.created_at)}
                 </Text>
               </View>
             )
@@ -314,18 +252,6 @@ export default function InboxScreen() {
           const req = item as Request
           const isLoading = loading === req.id
           const remindersDone = req.reminders_sent ?? 0
-          const remindersLeft = (req.repeat_count ?? 1) - remindersDone
-          const nextOrdinal = ordinal(remindersDone + 1)
-
-          // Next reminder is due at the scheduled time plus one interval per
-          // reminder already sent. Drives the countdown + button colour.
-          const dueAt = new Date(req.scheduled_at).getTime() + (req.interval_minutes ?? 0) * 60_000 * remindersDone
-          const remaining = dueAt - now
-          const phase = remaining > 0 ? 'waiting' : (now - dueAt) < OVERDUE_GRACE_MS ? 'due' : 'overdue'
-          const pokeBtn =
-            phase === 'due'     ? { bg: '#3b82f6', fg: '#ffffff', label: `🔔 Send ${nextOrdinal} reminder` }
-            : phase === 'overdue' ? { bg: '#f97316', fg: '#ffffff', label: `⚠️ Overdue — send ${nextOrdinal} reminder now!` }
-            : { bg: '#f3f4f6', fg: '#6b7280', label: `🕐 ${nextOrdinal} reminder in ${formatCountdown(remaining)}` }
 
           const statusColors: Record<string, { bg: string; text: string }> = {
             pending:  { bg: 'bg-yellow-100', text: 'text-yellow-700' },
@@ -357,7 +283,7 @@ export default function InboxScreen() {
                 </Text>
               </View>
               <Text className="text-gray-500 text-xs">
-                First reminder: {new Date(req.scheduled_at).toLocaleString()}
+                First reminder: {formatDateTime(req.scheduled_at)}
               </Text>
               {(req.repeat_count ?? 1) > 1 && (
                 <Text className="text-gray-400 text-xs mt-0.5">
@@ -385,30 +311,6 @@ export default function InboxScreen() {
                   >
                     <Text className="text-gray-600 text-sm font-medium">❌ Reject</Text>
                   </TouchableOpacity>
-                </View>
-              )}
-
-              {req.status === 'accepted' && remindersLeft > 0 && (
-                <TouchableOpacity
-                  onPress={() => sendReminder(req)}
-                  disabled={isLoading}
-                  className="w-full mt-4 rounded-2xl py-3 items-center"
-                  style={{ backgroundColor: pokeBtn.bg, opacity: isLoading ? 0.5 : 1 }}
-                  activeOpacity={0.8}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator color={pokeBtn.fg} size="small" />
-                  ) : (
-                    <Text className="text-sm font-medium" style={{ color: pokeBtn.fg }}>
-                      {pokeBtn.label}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-
-              {req.status === 'accepted' && remindersLeft === 0 && (
-                <View className="mt-4 py-3 items-center bg-gray-50 rounded-2xl">
-                  <Text className="text-gray-400 text-sm">All {req.repeat_count} reminders sent</Text>
                 </View>
               )}
             </View>

@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react'
+import * as Notifications from 'expo-notifications'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { scheduleLocalNotification } from '@/lib/notifications'
+import { routeFromNotification } from '@/navigation/navigationRef'
 
 const NOTIF_MESSAGES: Record<string, (payload: Record<string, string>) => { title: string; body: string }> = {
   reminder_request: (p) => ({
@@ -62,13 +64,29 @@ export default function NotificationProvider({ children }: { children: React.Rea
         const builder = NOTIF_MESSAGES[n.type]
         if (builder) {
           const { title, body } = builder(n.payload)
-          scheduleLocalNotification(title, body)
+          // Carry the type + payload so a tap on this local notification routes
+          // to the right screen, same as a background push.
+          scheduleLocalNotification(title, body, { type: n.type, ...n.payload })
         }
       })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [user])
+
+  // Notification taps → deep-link to the relevant screen. Handles both taps
+  // while the app is running and a tap that cold-launched the app.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      routeFromNotification(response.notification.request.content.data)
+    })
+
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) routeFromNotification(response.notification.request.content.data)
+    })
+
+    return () => sub.remove()
+  }, [])
 
   return <>{children}</>
 }

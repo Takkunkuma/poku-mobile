@@ -5,8 +5,8 @@ import {
 } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
+import DateTimeField from '@/components/DateTimeField'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { difficultyColor, difficultyTextColor, DIFFICULTY_LABELS } from '@/lib/difficulty'
@@ -40,7 +40,6 @@ export default function NewTaskScreen() {
   const [difficulty, setDifficulty] = useState(3)
   const [selectedFriends, setSelectedFriends] = useState<Friend[]>([])
   const [scheduledAt, setScheduledAt] = useState(new Date(Date.now() + 3600_000))
-  const [showPicker, setShowPicker] = useState(false)
   const [repeatCount, setRepeatCount] = useState(1)
   const [intervalMinutes, setIntervalMinutes] = useState(60)
   const [notificationType, setNotificationType] = useState<'standard' | 'time_sensitive'>('standard')
@@ -298,21 +297,7 @@ export default function NewTaskScreen() {
             {/* First reminder time */}
             <View>
               <Text className="text-sm font-semibold text-gray-700 mb-2">First reminder at</Text>
-              <TouchableOpacity
-                onPress={() => setShowPicker(true)}
-                className="bg-white border border-gray-200 rounded-2xl px-4 py-4"
-                activeOpacity={0.7}
-              >
-                <Text className="text-gray-700">{scheduledAt.toLocaleString()}</Text>
-              </TouchableOpacity>
-              {showPicker && (
-                <DateTimePicker
-                  value={scheduledAt}
-                  mode="datetime"
-                  minimumDate={new Date()}
-                  onChange={(_, date) => { setShowPicker(false); if (date) setScheduledAt(date) }}
-                />
-              )}
+              <DateTimeField value={scheduledAt} onChange={setScheduledAt} minimumDate={new Date()} />
             </View>
 
             {/* Number of reminders */}
